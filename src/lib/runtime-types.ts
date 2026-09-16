@@ -82,6 +82,16 @@ export interface CreateVoiceChannelRequest {
   readonly reason?: string;
 }
 
+export interface CreateGuildChannelRequest {
+  readonly guildId: string;
+  readonly name: string;
+  readonly type: number;
+  readonly parentId?: string;
+  readonly userLimit?: number;
+  readonly requestId: string;
+  readonly reason?: string;
+}
+
 export interface DiscordApiPort {
   respondToInteraction(request: InteractionResponseRequest): Promise<void>;
   deferInteraction(request: {
@@ -96,6 +106,9 @@ export interface DiscordApiPort {
   }): Promise<void>;
   createVoiceChannel(
     request: CreateVoiceChannelRequest,
+  ): Promise<DiscordValueResult<{ readonly id: string }>>;
+  createGuildChannel(
+    request: CreateGuildChannelRequest,
   ): Promise<DiscordValueResult<{ readonly id: string }>>;
   deleteChannel(request: {
     readonly channelId: string;

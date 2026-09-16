@@ -1,4 +1,7 @@
+import { ChannelTypes } from "discordeno";
+
 import type {
+  CreateGuildChannelRequest,
   CreateVoiceChannelRequest,
   DiscordApiPort,
   DiscordOperationResult,
@@ -21,6 +24,7 @@ export interface FakeDiscordControls {
   readonly voiceByUser: Map<string, string | null>;
   readonly users: Map<string, { id: string; bot: boolean }>;
   readonly createCalls: CreateVoiceChannelRequest[];
+  readonly guildChannelCreates: CreateGuildChannelRequest[];
   readonly deleteCalls: { channelId: string; requestId: string }[];
   readonly moveCalls: { guildId: string; userId: string; channelId: string; requestId: string }[];
   readonly editCalls: { channelId: string; requestId: string; name?: string; userLimit?: number }[];
@@ -36,6 +40,7 @@ export interface FakeDiscordControls {
   readonly editedInteractions: { token: string; content: string }[];
   readonly responses: { interactionId: string; content: string }[];
   failNextCreate?: DiscordValueResult<{ id: string }>;
+  failNextGuildChannelCreate?: DiscordValueResult<{ id: string }>;
   failNextMove?: DiscordOperationResult;
   failNextDelete?: DiscordOperationResult;
   failNextEdit?: DiscordOperationResult;
@@ -54,6 +59,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     voiceByUser: seed?.voiceByUser ?? new Map(),
     users: seed?.users ?? new Map(),
     createCalls: [],
+    guildChannelCreates: [],
     deleteCalls: [],
     moveCalls: [],
     editCalls: [],
@@ -64,6 +70,9 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     missingChannels: seed?.missingChannels ?? new Set(),
     createSequence: seed?.createSequence ?? 0,
     ...(seed?.failNextCreate === undefined ? {} : { failNextCreate: seed.failNextCreate }),
+    ...(seed?.failNextGuildChannelCreate === undefined
+      ? {}
+      : { failNextGuildChannelCreate: seed.failNextGuildChannelCreate }),
     ...(seed?.failNextMove === undefined ? {} : { failNextMove: seed.failNextMove }),
     ...(seed?.failNextDelete === undefined ? {} : { failNextDelete: seed.failNextDelete }),
     ...(seed?.failNextEdit === undefined ? {} : { failNextEdit: seed.failNextEdit }),
@@ -98,7 +107,29 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       controls.channels.set(id, {
         id,
         name: request.name,
+        type: ChannelTypes.GuildVoice,
         parentId: request.parentId,
+        ...(request.userLimit === undefined ? {} : { userLimit: request.userLimit }),
+        guildId: request.guildId,
+        permissionOverwrites: [],
+      });
+      return { kind: "found", value: { id } };
+    },
+
+    async createGuildChannel(request) {
+      controls.guildChannelCreates.push(request);
+      if (controls.failNextGuildChannelCreate) {
+        const result = controls.failNextGuildChannelCreate;
+        delete controls.failNextGuildChannelCreate;
+        return result;
+      }
+      controls.createSequence += 1;
+      const id = `9${String(controls.createSequence).padStart(17, "0")}`;
+      controls.channels.set(id, {
+        id,
+        name: request.name,
+        type: request.type,
+        ...(request.parentId === undefined ? {} : { parentId: request.parentId }),
         ...(request.userLimit === undefined ? {} : { userLimit: request.userLimit }),
         guildId: request.guildId,
         permissionOverwrites: [],

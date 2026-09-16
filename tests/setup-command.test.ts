@@ -11,43 +11,26 @@ function baseInteraction(
   overrides: Partial<InteractionCreatePayload> = {},
 ): InteractionCreatePayload {
   return {
-    id: "1",
+    id: "987654321098765432",
     token: "token",
     type: 2,
-    applicationId: "100",
+    applicationId: "111111111111111111",
     guildId: "123456789012345678",
     userId: "223456789012345678",
     memberPermissions: String(BitwisePermissionFlags.MANAGE_GUILD),
     commandName: "setup",
-    options: [
-      { name: "lobby", type: 7, value: "333456789012345678" },
-      { name: "category", type: 7, value: "443456789012345678" },
-    ],
+    options: [],
     ...overrides,
   };
 }
 
 describe("/setup command", () => {
   test("rejects users without Manage Server", async () => {
-    const { discord, controls } = createFakeDiscord();
+    const { discord } = createFakeDiscord();
     const replies: string[] = [];
     discord.respondToInteraction = async (request) => {
       replies.push(request.content);
     };
-    controls.channels.set("333456789012345678", {
-      id: "333456789012345678",
-      name: "Lobby",
-      type: ChannelTypes.GuildVoice,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
-    controls.channels.set("443456789012345678", {
-      id: "443456789012345678",
-      name: "Temp",
-      type: ChannelTypes.GuildCategory,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
 
     const setup = createSetupCommandService({
       configs: createMemoryGuildConfigRepository(),
@@ -59,27 +42,8 @@ describe("/setup command", () => {
     expect(replies[0]).toMatch(/Manage Server/i);
   });
 
-  test("upserts guild config for an authorized admin", async () => {
+  test("creates category and lobby channels then saves guild config", async () => {
     const { discord, controls } = createFakeDiscord();
-    const replies: string[] = [];
-    discord.respondToInteraction = async (request) => {
-      replies.push(request.content);
-    };
-    controls.channels.set("333456789012345678", {
-      id: "333456789012345678",
-      name: "Lobby",
-      type: ChannelTypes.GuildVoice,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
-    controls.channels.set("443456789012345678", {
-      id: "443456789012345678",
-      name: "Temp",
-      type: ChannelTypes.GuildCategory,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
-
     const configs = createMemoryGuildConfigRepository();
     const setup = createSetupCommandService({
       configs,
@@ -90,43 +54,58 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         options: [
-          { name: "lobby", type: 7, value: "333456789012345678" },
-          { name: "category", type: 7, value: "443456789012345678" },
+          { name: "category_name", type: 3, value: "Voice Rooms" },
+          { name: "lobby_name", type: 3, value: "Create Channel" },
           { name: "template", type: 3, value: "{username}'s room" },
           { name: "limit", type: 4, value: 4 },
         ],
       }),
     );
 
+    expect(controls.deferredInteractions).toEqual(["987654321098765432"]);
+    expect(controls.guildChannelCreates).toHaveLength(2);
+    expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
+    expect(controls.guildChannelCreates[0]?.name).toBe("Voice Rooms");
+    expect(controls.guildChannelCreates[1]?.type).toBe(ChannelTypes.GuildVoice);
+    expect(controls.guildChannelCreates[1]?.name).toBe("Create Channel");
+
+    const categoryId = controls.guildChannelCreates[0]
+      ? [...controls.channels.values()].find(
+          (channel) => channel.name === "Voice Rooms" && channel.type === ChannelTypes.GuildCategory,
+        )?.id
+      : undefined;
+    const lobbyId = controls.guildChannelCreates[1]
+      ? [...controls.channels.values()].find(
+          (channel) => channel.name === "Create Channel" && channel.type === ChannelTypes.GuildVoice,
+        )?.id
+      : undefined;
+
+    expect(categoryId).toBeDefined();
+    expect(lobbyId).toBeDefined();
+    expect(controls.guildChannelCreates[1]?.parentId).toBe(categoryId);
+
     const saved = await configs.findByGuildId("123456789012345678");
     expect(saved?.enabled).toBe(true);
-    expect(saved?.lobbyChannelId).toBe("333456789012345678");
-    expect(saved?.categoryId).toBe("443456789012345678");
+    expect(saved?.lobbyChannelId).toBe(lobbyId);
+    expect(saved?.categoryId).toBe(categoryId);
     expect(saved?.channelNameTemplate).toBe("{username}'s room");
     expect(saved?.defaultUserLimit).toBe(4);
-    expect(replies[0]).toMatch(/configured/i);
+
+    const edited = controls.editedInteractions[0]?.content ?? "";
+    expect(edited).toMatch(/ready/i);
   });
 
-  test("rejects non-voice lobby channels", async () => {
+  test("compensates when lobby channel creation fails", async () => {
     const { discord, controls } = createFakeDiscord();
-    const replies: string[] = [];
-    discord.respondToInteraction = async (request) => {
-      replies.push(request.content);
+    let createCount = 0;
+    const originalCreate = discord.createGuildChannel.bind(discord);
+    discord.createGuildChannel = async (request) => {
+      createCount += 1;
+      if (createCount === 1) {
+        return originalCreate(request);
+      }
+      return { kind: "forbidden" };
     };
-    controls.channels.set("333456789012345678", {
-      id: "333456789012345678",
-      name: "not-voice",
-      type: ChannelTypes.GuildText,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
-    controls.channels.set("443456789012345678", {
-      id: "443456789012345678",
-      name: "Temp",
-      type: ChannelTypes.GuildCategory,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
 
     const setup = createSetupCommandService({
       configs: createMemoryGuildConfigRepository(),
@@ -135,6 +114,8 @@ describe("/setup command", () => {
     });
 
     await setup.execute(baseInteraction());
-    expect(replies[0]).toMatch(/voice channel/i);
+
+    expect(controls.deleteCalls.length).toBeGreaterThanOrEqual(1);
+    expect(controls.editedInteractions[0]?.content).toMatch(/join-to-create voice channel/i);
   });
 });

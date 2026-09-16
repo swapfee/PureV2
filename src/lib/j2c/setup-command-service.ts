@@ -3,6 +3,11 @@ import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import { DEFAULT_CHANNEL_NAME_TEMPLATE } from "../../models/snowflake.ts";
+import {
+  DEFAULT_SETUP_CATEGORY_NAME,
+  DEFAULT_SETUP_LOBBY_NAME,
+  normalizeSetupChannelName,
+} from "./setup-channel-names.ts";
 import { GuildConfigValidationError, validateUpsertGuildConfigInput } from "./validation.ts";
 import type { GuildConfigRepository } from "./repositories.ts";
 
@@ -24,6 +29,19 @@ function hasManageGuild(permissions: string | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+function createFailureMessage(
+  result: { readonly kind: "missing" | "forbidden" | "transient"; readonly message?: string },
+  action: string,
+): string {
+  if (result.kind === "forbidden") {
+    return `Missing permission to ${action}. Ensure the bot has **Manage Channels**.`;
+  }
+  if (result.kind === "transient") {
+    return `Discord failed to ${action}${result.message ? `: ${result.message}` : ""}. Try again.`;
+  }
+  return `Could not ${action}.`;
 }
 
 export interface SetupCommandService {
@@ -48,6 +66,14 @@ export function createSetupCommandService(options: {
         });
       };
 
+      const finish = async (content: string): Promise<void> => {
+        await discord.editInteractionResponse({
+          applicationId: interaction.applicationId,
+          interactionToken: interaction.token,
+          content,
+        });
+      };
+
       if (!interaction.guildId) {
         await reply("Use `/setup` in a server.");
         return;
@@ -58,44 +84,77 @@ export function createSetupCommandService(options: {
         return;
       }
 
-      const lobbyRaw = optionValue(interaction.options, "lobby");
-      const categoryRaw = optionValue(interaction.options, "category");
-      if (typeof lobbyRaw !== "string" || typeof categoryRaw !== "string") {
-        await reply("Lobby and category channels are required.");
-        return;
-      }
+      await discord.deferInteraction({
+        interactionId: interaction.id,
+        interactionToken: interaction.token,
+        ephemeral: true,
+      });
+
+      const guildId = interaction.guildId;
+      const categoryName = normalizeSetupChannelName(
+        typeof optionValue(interaction.options, "category_name") === "string"
+          ? String(optionValue(interaction.options, "category_name"))
+          : undefined,
+        DEFAULT_SETUP_CATEGORY_NAME,
+      );
+      const lobbyName = normalizeSetupChannelName(
+        typeof optionValue(interaction.options, "lobby_name") === "string"
+          ? String(optionValue(interaction.options, "lobby_name"))
+          : undefined,
+        DEFAULT_SETUP_LOBBY_NAME,
+      );
 
       const templateRaw = optionValue(interaction.options, "template");
       const limitRaw = optionValue(interaction.options, "limit");
       const enabledRaw = optionValue(interaction.options, "enabled");
       const moderatorRaw = optionValue(interaction.options, "moderator_role");
 
-      const lobby = await discord.getChannel({ channelId: lobbyRaw });
-      if (lobby.kind !== "found") {
-        await reply("Could not load the lobby channel. Pick a voice channel in this server.");
-        return;
-      }
-      if (lobby.value.type !== ChannelTypes.GuildVoice) {
-        await reply("Lobby must be a voice channel.");
+      const setupReason = "PureV2 Join-to-Create setup";
+      const categoryRequestId = `setup:${interaction.id}:category`;
+
+      const categoryCreated = await discord.createGuildChannel({
+        guildId,
+        name: categoryName,
+        type: ChannelTypes.GuildCategory,
+        requestId: categoryRequestId,
+        reason: setupReason,
+      });
+
+      if (categoryCreated.kind !== "found") {
+        await finish(createFailureMessage(categoryCreated, "create the category"));
         return;
       }
 
-      const category = await discord.getChannel({ channelId: categoryRaw });
-      if (category.kind !== "found") {
-        await reply("Could not load the category. Pick a category channel in this server.");
+      const categoryId = categoryCreated.value.id;
+      const lobbyRequestId = `setup:${interaction.id}:lobby`;
+
+      const lobbyCreated = await discord.createGuildChannel({
+        guildId,
+        name: lobbyName,
+        type: ChannelTypes.GuildVoice,
+        parentId: categoryId,
+        requestId: lobbyRequestId,
+        reason: setupReason,
+      });
+
+      if (lobbyCreated.kind !== "found") {
+        await discord.deleteChannel({
+          channelId: categoryId,
+          requestId: `setup:${interaction.id}:compensate-category`,
+          reason: setupReason,
+        });
+        await finish(createFailureMessage(lobbyCreated, "create the join-to-create voice channel"));
         return;
       }
-      if (category.value.type !== ChannelTypes.GuildCategory) {
-        await reply("Category must be a category channel.");
-        return;
-      }
+
+      const lobbyChannelId = lobbyCreated.value.id;
 
       try {
         const input = validateUpsertGuildConfigInput({
-          guildId: interaction.guildId,
+          guildId,
           enabled: typeof enabledRaw === "boolean" ? enabledRaw : true,
-          lobbyChannelId: lobbyRaw,
-          categoryId: categoryRaw,
+          lobbyChannelId,
+          categoryId,
           channelNameTemplate:
             typeof templateRaw === "string" && templateRaw.trim().length > 0
               ? templateRaw
@@ -107,7 +166,7 @@ export function createSetupCommandService(options: {
         });
 
         const record = await configs.upsert(input);
-        logger.info("Guild Join-to-Create config upserted", {
+        logger.info("Guild Join-to-Create setup completed", {
           guildId: record.guildId,
           lobbyChannelId: record.lobbyChannelId,
           categoryId: record.categoryId,
@@ -115,28 +174,41 @@ export function createSetupCommandService(options: {
           userId: interaction.userId,
         });
 
-        await reply(
+        await finish(
           [
-            "Join-to-Create configured.",
+            "Join-to-Create is ready.",
+            `Category: <#${record.categoryId}> (\`${categoryName}\`)`,
+            `Lobby: <#${record.lobbyChannelId}> (\`${lobbyName}\`)`,
             `Enabled: ${record.enabled ? "yes" : "no"}`,
-            `Lobby: <#${record.lobbyChannelId}>`,
-            `Category: <#${record.categoryId}>`,
             `Template: \`${record.channelNameTemplate}\``,
             record.defaultUserLimit === undefined
               ? "Default limit: unlimited"
               : `Default limit: ${record.defaultUserLimit}`,
+            "",
+            "Members join the lobby voice channel to get a temporary channel.",
           ].join("\n"),
         );
       } catch (error: unknown) {
+        await discord.deleteChannel({
+          channelId: lobbyChannelId,
+          requestId: `setup:${interaction.id}:compensate-lobby`,
+          reason: setupReason,
+        });
+        await discord.deleteChannel({
+          channelId: categoryId,
+          requestId: `setup:${interaction.id}:compensate-category`,
+          reason: setupReason,
+        });
+
         if (error instanceof GuildConfigValidationError) {
-          await reply(error.message);
+          await finish(error.message);
           return;
         }
-        logger.error("Setup command failed", {
-          guildId: interaction.guildId,
+        logger.error("Setup command failed saving config", {
+          guildId,
           error: error instanceof Error ? error.message : String(error),
         });
-        await reply("Could not save Join-to-Create settings. Try again later.");
+        await finish("Created Discord channels but could not save settings. Try `/setup` again.");
       }
     },
   };

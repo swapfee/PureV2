@@ -12,6 +12,7 @@ import { toDiscordOperationResult, toDiscordValueResult } from "../j2c/discord-r
 import type { Logger } from "../logger.ts";
 import { createDiscordenoLogger } from "../logger.ts";
 import type {
+  CreateGuildChannelRequest,
   CreateVoiceChannelRequest,
   DiscordApiPort,
   InteractionResponseRequest,
@@ -49,6 +50,11 @@ function withReason<T extends Record<string, unknown>>(
   reason: string | undefined,
 ): T & { reason?: string } {
   return reason === undefined ? base : { ...base, reason };
+}
+
+function isVoiceChannelType(type: number): boolean {
+  const voiceType: number = ChannelTypes.GuildVoice;
+  return type === voiceType;
 }
 
 function readOverwrites(raw: unknown): PermissionOverwrite[] | undefined {
@@ -111,6 +117,32 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
                 type: ChannelTypes.GuildVoice,
                 parent_id: request.parentId,
                 ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "found" as const, value: { id: String(created.id) } };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async createGuildChannel(request: CreateGuildChannelRequest) {
+      try {
+        const created = await bot.rest.makeRequest<{ id: string | number | bigint }>(
+          "POST",
+          bot.rest.routes.guilds.channels(request.guildId),
+          withReason(
+            {
+              body: {
+                name: request.name,
+                type: request.type,
+                ...(request.parentId === undefined ? {} : { parent_id: request.parentId }),
+                ...(request.userLimit === undefined || !isVoiceChannelType(request.type)
+                  ? {}
+                  : { user_limit: request.userLimit }),
               },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },

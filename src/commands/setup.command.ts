@@ -1,33 +1,31 @@
-import {
-  ApplicationCommandOptionTypes,
-  ChannelTypes,
-  type CreateApplicationCommand,
-} from "discordeno";
+import { ApplicationCommandOptionTypes, type CreateApplicationCommand } from "discordeno";
 
 import type { CommandModule } from "../handlers/types.ts";
 
 const setupCommandData: CreateApplicationCommand = {
   name: "setup",
-  description: "Configure Join-to-Create for this server",
+  description: "Create Join-to-Create category and lobby channel for this server",
   options: [
     {
-      type: ApplicationCommandOptionTypes.Channel,
-      name: "lobby",
-      description: "Voice channel members join to create a temporary channel",
-      required: true,
-      channelTypes: [ChannelTypes.GuildVoice],
+      type: ApplicationCommandOptionTypes.String,
+      name: "category_name",
+      description: "Name for the new category (default: Join to Create)",
+      required: false,
+      minLength: 1,
+      maxLength: 100,
     },
     {
-      type: ApplicationCommandOptionTypes.Channel,
-      name: "category",
-      description: "Category where temporary channels are created",
-      required: true,
-      channelTypes: [ChannelTypes.GuildCategory],
+      type: ApplicationCommandOptionTypes.String,
+      name: "lobby_name",
+      description: "Name for the join-to-create voice channel (default: Join to Create)",
+      required: false,
+      minLength: 1,
+      maxLength: 100,
     },
     {
       type: ApplicationCommandOptionTypes.String,
       name: "template",
-      description: "Channel name template (default: {username}'s Channel)",
+      description: "Temporary channel name template (default: {username}'s channel)",
       required: false,
       minLength: 1,
       maxLength: 100,
@@ -35,7 +33,7 @@ const setupCommandData: CreateApplicationCommand = {
     {
       type: ApplicationCommandOptionTypes.Integer,
       name: "limit",
-      description: "Default user limit for new channels (0 = unlimited)",
+      description: "Default user limit for new temporary channels (0 = unlimited)",
       required: false,
       minValue: 0,
       maxValue: 99,
@@ -57,7 +55,7 @@ const setupCommandData: CreateApplicationCommand = {
 
 const setupCommand: CommandModule = {
   data: setupCommandData,
-  cooldownMs: 5_000,
+  cooldownMs: 30_000,
   async execute(context, interaction) {
     if (!context.setup) {
       await context.discord.respondToInteraction({

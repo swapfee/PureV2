@@ -2,6 +2,7 @@ import { ChannelTypes, type RestManager } from "discordeno";
 
 import { REST_REQUEST_ID_HEADER } from "../coordinator/rest.ts";
 import type {
+  CreateGuildChannelRequest,
   CreateVoiceChannelRequest,
   DiscordApiPort,
 } from "../runtime-types.ts";
@@ -66,6 +67,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       } catch (error) {
         return toDiscordValueResult(error);
       }
+    },
+
+    async createGuildChannel(_request: CreateGuildChannelRequest) {
+      throw new Error("createGuildChannel is not available on the coordinator Discord port");
     },
 
     async deleteChannel(request) {
