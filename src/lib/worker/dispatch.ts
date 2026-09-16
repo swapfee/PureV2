@@ -14,6 +14,36 @@ function bigintToSnowflake(value: bigint | undefined): string | undefined {
   return value === undefined ? undefined : value.toString();
 }
 
+/**
+ * Discordeno transforms interaction member permissions into a Permissions object
+ * with a bigint `bitfield` (and toJSON()). Accept raw strings/bigints too.
+ */
+export function extractMemberPermissionBits(raw: unknown): string | undefined {
+  if (typeof raw === "bigint" || typeof raw === "number" || typeof raw === "string") {
+    return String(raw);
+  }
+  if (typeof raw !== "object" || raw === null) return undefined;
+
+  const bitfield = Reflect.get(raw, "bitfield");
+  if (typeof bitfield === "bigint" || typeof bitfield === "number" || typeof bitfield === "string") {
+    return String(bitfield);
+  }
+
+  const toJSON = Reflect.get(raw, "toJSON");
+  if (typeof toJSON === "function") {
+    try {
+      const json: unknown = toJSON.call(raw);
+      if (typeof json === "bigint" || typeof json === "number" || typeof json === "string") {
+        return String(json);
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
 function mapInteractionOption(option: {
   readonly name: string;
   readonly type: number;
@@ -119,13 +149,9 @@ export function wireBotEvents(
       mapInteractionOption(option),
     );
 
-    const memberPermissionsRaw = Reflect.get(interaction.member ?? {}, "permissions");
-    const memberPermissions =
-      typeof memberPermissionsRaw === "bigint" ||
-      typeof memberPermissionsRaw === "number" ||
-      typeof memberPermissionsRaw === "string"
-        ? String(memberPermissionsRaw)
-        : undefined;
+    const memberPermissions = extractMemberPermissionBits(
+      Reflect.get(interaction.member ?? {}, "permissions"),
+    );
 
     const payload: InteractionCreatePayload = {
       id: interaction.id.toString(),
