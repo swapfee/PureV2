@@ -38,8 +38,16 @@ export interface FakeDiscordControls {
     type: 0 | 1;
   }[];
   readonly deferredInteractions: string[];
-  readonly editedInteractions: { token: string; content: string }[];
-  readonly responses: { interactionId: string; content: string }[];
+  readonly editedInteractions: {
+    token: string;
+    content?: string;
+    embeds?: readonly { description: string; color?: number; title?: string }[];
+  }[];
+  readonly responses: {
+    interactionId: string;
+    content?: string;
+    embeds?: readonly { description: string; color?: number; title?: string }[];
+  }[];
   failNextCreate?: DiscordValueResult<{ id: string }>;
   failNextGuildChannelCreate?: DiscordValueResult<{ id: string }>;
   failNextMove?: DiscordOperationResult;
@@ -86,7 +94,11 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
 
   const discord: DiscordApiPort = {
     async respondToInteraction(request) {
-      controls.responses.push({ interactionId: request.interactionId, content: request.content });
+      controls.responses.push({
+        interactionId: request.interactionId,
+        ...(request.content === undefined ? {} : { content: request.content }),
+        ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
+      });
     },
 
     async deferInteraction(request) {
@@ -94,7 +106,11 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     },
 
     async editInteractionResponse(request) {
-      controls.editedInteractions.push({ token: request.interactionToken, content: request.content });
+      controls.editedInteractions.push({
+        token: request.interactionToken,
+        ...(request.content === undefined ? {} : { content: request.content }),
+        ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
+      });
     },
 
     async createVoiceChannel(request) {

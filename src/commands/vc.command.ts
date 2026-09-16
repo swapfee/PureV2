@@ -4,6 +4,7 @@ import {
 } from "discordeno";
 
 import type { CommandModule } from "../handlers/types.ts";
+import { failureResponse } from "../lib/j2c/action-response.ts";
 
 const vcCommandData: CreateApplicationCommand = {
   name: "vc",
@@ -72,7 +73,10 @@ const vcCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        content: "Voice channel management is not ready yet.",
+        embeds: failureResponse(
+          "Action Failed",
+          "Voice channel management is not ready yet.",
+        ).embeds,
         ephemeral: true,
       });
       return;

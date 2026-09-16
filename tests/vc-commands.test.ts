@@ -19,6 +19,12 @@ const botUserId = "777777777777777777";
 const channelId = "444444444444444444";
 const lobbyId = "222222222222222222";
 
+function embedText(
+  entry: { content?: string; embeds?: readonly { description: string }[] } | undefined,
+): string {
+  return entry?.embeds?.[0]?.description ?? entry?.content ?? "";
+}
+
 function interaction(
   partial: {
     readonly id?: string;
@@ -107,7 +113,7 @@ describe("/vc command family", () => {
       }),
     );
     expect(controls.deferredInteractions).toHaveLength(1);
-    expect(controls.editedInteractions[0]?.content).toMatch(/server/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/server/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
@@ -120,7 +126,7 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(controls.editedInteractions[0]?.content).toMatch(/do not own/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/do not own/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
@@ -133,7 +139,7 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(controls.editedInteractions[0]?.content).toMatch(/connected/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/connected/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
@@ -146,7 +152,7 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(controls.editedInteractions[0]?.content).toMatch(/no longer exists/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/no longer exists/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
@@ -166,7 +172,7 @@ describe("/vc command family", () => {
         ],
       }),
     );
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/yourself/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/yourself/i);
 
     await vc.execute(
       interaction({
@@ -181,7 +187,7 @@ describe("/vc command family", () => {
         ],
       }),
     );
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/bots/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/bots/i);
 
     await vc.execute(
       interaction({
@@ -251,7 +257,7 @@ describe("/vc command family", () => {
         ],
       }),
     );
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/wait/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/wait/i);
     expect(metrics.snapshot().cooldownRejections).toBe(1);
     expect(VC_COOLDOWNS_MS.rename).toBeGreaterThan(0);
     expect(cooldowns.size()).toBeGreaterThan(0);
@@ -288,7 +294,7 @@ describe("/vc command family", () => {
       }),
     );
     expect(controls.editCalls.at(-1)?.userLimit).toBe(0);
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/removed/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/removed/i);
   });
 
   test("lock and unlock are idempotent and preserve invitations", async () => {
@@ -329,7 +335,7 @@ describe("/vc command family", () => {
     const { vc, controls, metrics } = await setup();
     controls.failNextOverwrite = { kind: "transient", message: "rate" };
     await vc.execute(interaction({ id: "lock-fail", guildId, options: [{ name: "lock", type: 1 }] }));
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/Could not lock/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Could not lock/i);
     expect(metrics.snapshot().restFailures).toBe(1);
   });
 

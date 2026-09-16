@@ -101,7 +101,8 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
         type: InteractionResponseTypes.ChannelMessageWithSource,
         data: {
-          content: request.content,
+          ...(request.content === undefined ? {} : { content: request.content }),
+          ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
           ...(request.ephemeral === false ? {} : { flags: 64 }),
         },
       });
@@ -116,7 +117,8 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
 
     async editInteractionResponse(request) {
       await bot.helpers.editOriginalInteractionResponse(request.interactionToken, {
-        content: request.content,
+        ...(request.content === undefined ? {} : { content: request.content }),
+        ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
       });
     },
 

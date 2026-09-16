@@ -1,8 +1,17 @@
 import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
 
 import type { Logger } from "../logger.ts";
-import type { DiscordApiPort, InteractionCreatePayload, InteractionOption } from "../runtime-types.ts";
+import type {
+  DiscordApiPort,
+  InteractionCreatePayload,
+  InteractionOption,
+} from "../runtime-types.ts";
 import { DEFAULT_CHANNEL_NAME_TEMPLATE } from "../../models/snowflake.ts";
+import {
+  type ActionMessage,
+  failureResponse,
+  successResponse,
+} from "./action-response.ts";
 import { runFactoryReset } from "./factory-reset.ts";
 import {
   DEFAULT_SETUP_CATEGORY_NAME,
@@ -19,6 +28,11 @@ import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
 
 const MANAGE_GUILD = BitwisePermissionFlags.MANAGE_GUILD;
 const ADMINISTRATOR = BitwisePermissionFlags.ADMINISTRATOR;
+
+const SETUP_ERROR_HEADLINE = "Error setting Join to Create System";
+const SETUP_SUCCESS_HEADLINE = "Setup Complete";
+const RESET_SUCCESS_HEADLINE = "Factory Reset Complete";
+const RESET_ERROR_HEADLINE = "Error resetting Join to Create System";
 
 function optionValue(
   options: readonly InteractionOption[] | undefined,
@@ -53,14 +67,17 @@ function hasManageGuild(permissions: string | undefined): boolean {
 function createFailureMessage(
   result: { readonly kind: "missing" | "forbidden" | "transient"; readonly message?: string },
   action: string,
-): string {
+): ActionMessage {
   if (result.kind === "forbidden") {
-    return `Missing permission to ${action}. Ensure the bot has **Manage Channels**.`;
+    return failureResponse(SETUP_ERROR_HEADLINE, "Lack of permission on client or user side.");
   }
   if (result.kind === "transient") {
-    return `Discord failed to ${action}${result.message ? `: ${result.message}` : ""}. Try again.`;
+    return failureResponse(
+      SETUP_ERROR_HEADLINE,
+      `Discord failed to ${action}${result.message ? `: ${result.message}` : ""}. Try again.`,
+    );
   }
-  return `Could not ${action}.`;
+  return failureResponse(SETUP_ERROR_HEADLINE, `Could not ${action}.`);
 }
 
 export interface SetupCommandService {
@@ -79,36 +96,40 @@ export function createSetupCommandService(options: {
 
   return {
     async execute(interaction): Promise<void> {
-      const reply = async (content: string): Promise<void> => {
+      const reply = async (message: ActionMessage): Promise<void> => {
         await discord.respondToInteraction({
           interactionId: interaction.id,
           interactionToken: interaction.token,
-          content,
+          embeds: message.embeds,
           ephemeral: true,
         });
       };
 
-      const finish = async (content: string): Promise<void> => {
+      const finish = async (message: ActionMessage): Promise<void> => {
         await discord.editInteractionResponse({
           applicationId: interaction.applicationId,
           interactionToken: interaction.token,
-          content,
+          embeds: message.embeds,
         });
       };
 
       if (!interaction.guildId) {
-        await reply("Use `/setup` in a server.");
+        await reply(failureResponse(SETUP_ERROR_HEADLINE, "Use `/setup` in a server."));
         return;
       }
 
       if (!hasManageGuild(interaction.memberPermissions)) {
-        await reply("You need the Manage Server permission to configure Join-to-Create.");
+        await reply(
+          failureResponse(SETUP_ERROR_HEADLINE, "Lack of permission on client or user side."),
+        );
         return;
       }
 
       const sub = resolveSubcommand(interaction.options);
       if (sub.name !== "create" && sub.name !== "reset") {
-        await reply("Use `/setup create` or `/setup reset`.");
+        await reply(
+          failureResponse(SETUP_ERROR_HEADLINE, "Use `/setup create` or `/setup reset`."),
+        );
         return;
       }
 
@@ -131,13 +152,18 @@ export function createSetupCommandService(options: {
         });
 
         if ("kind" in result) {
-          await finish("Join-to-Create is not configured in this server.");
+          await finish(
+            failureResponse(
+              RESET_ERROR_HEADLINE,
+              "Join to Create System is not configured in this server.",
+            ),
+          );
           return;
         }
 
         await finish(
-          [
-            "Factory reset complete. Join-to-Create has been removed.",
+          successResponse(RESET_SUCCESS_HEADLINE, [
+            "Join to Create System has been removed.",
             `Deleted empty temporary channels: ${result.deletedTemporaryChannels}`,
             `Kept occupied temporary channels: ${result.keptTemporaryChannels}`,
             result.deletedLobby ? "Lobby deleted." : "Lobby could not be deleted (check bot permissions).",
@@ -146,13 +172,21 @@ export function createSetupCommandService(options: {
               : result.keptCategory
                 ? `Category kept${result.renamedCategory ? ` and renamed to \`${DEFAULT_SETUP_CATEGORY_NAME}\`` : ""} because occupied temporary channels remain.`
                 : "Category status unknown.",
-            "Run `/setup create` to install Join-to-Create again.",
-          ].join("\n"),
+            "Run `/setup create` to install Join to Create System again.",
+          ]),
         );
         return;
       }
 
       const guildId = interaction.guildId;
+      const existing = await configs.findByGuildId(guildId);
+      if (existing) {
+        await finish(
+          failureResponse(SETUP_ERROR_HEADLINE, "Join to Create System already exists."),
+        );
+        return;
+      }
+
       const categoryName = normalizeSetupChannelName(
         typeof optionValue(sub.options, "category_name") === "string"
           ? String(optionValue(sub.options, "category_name"))
@@ -237,8 +271,7 @@ export function createSetupCommandService(options: {
         });
 
         await finish(
-          [
-            "Join-to-Create is ready.",
+          successResponse(SETUP_SUCCESS_HEADLINE, [
             `Category: <#${record.categoryId}> (\`${categoryName}\`)`,
             `Lobby: <#${record.lobbyChannelId}> (\`${lobbyName}\`)`,
             `Enabled: ${record.enabled ? "yes" : "no"}`,
@@ -246,9 +279,8 @@ export function createSetupCommandService(options: {
             record.defaultUserLimit === undefined
               ? "Default limit: unlimited"
               : `Default limit: ${record.defaultUserLimit}`,
-            "",
             "Members join the lobby voice channel to get a temporary channel.",
-          ].join("\n"),
+          ]),
         );
       } catch (error: unknown) {
         await discord.deleteChannel({
@@ -263,14 +295,19 @@ export function createSetupCommandService(options: {
         });
 
         if (error instanceof GuildConfigValidationError) {
-          await finish(error.message);
+          await finish(failureResponse(SETUP_ERROR_HEADLINE, error.message));
           return;
         }
         logger.error("Setup command failed saving config", {
           guildId,
           error: error instanceof Error ? error.message : String(error),
         });
-        await finish("Created Discord channels but could not save settings. Try `/setup create` again.");
+        await finish(
+          failureResponse(
+            SETUP_ERROR_HEADLINE,
+            "Created Discord channels but could not save settings. Try `/setup create` again.",
+          ),
+        );
       }
     },
   };

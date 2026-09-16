@@ -48,16 +48,24 @@ function createSetupDeps() {
   return { discord, controls, configs, channels, reservations, occupancy, setup };
 }
 
+function lastEmbedDescription(
+  edited: { embeds?: readonly { description: string }[]; content?: string }[],
+): string {
+  const last = edited.at(-1);
+  return last?.embeds?.[0]?.description ?? last?.content ?? "";
+}
+
 describe("/setup command", () => {
   test("rejects users without Manage Server", async () => {
     const { setup, discord } = createSetupDeps();
     const replies: string[] = [];
     discord.respondToInteraction = async (request) => {
-      replies.push(request.content);
+      replies.push(request.embeds?.[0]?.description ?? request.content ?? "");
     };
 
     await setup.execute(baseInteraction({ memberPermissions: "0" }));
-    expect(replies[0]).toMatch(/Manage Server/i);
+    expect(replies[0]).toMatch(/Error setting Join to Create System/i);
+    expect(replies[0]).toMatch(/Lack of permission on client or user side/i);
   });
 
   test("creates category and lobby channels then saves guild config", async () => {
@@ -104,7 +112,10 @@ describe("/setup command", () => {
     expect(saved?.categoryId).toBe(categoryId);
     expect(saved?.channelNameTemplate).toBe("{username}'s room");
     expect(saved?.defaultUserLimit).toBe(4);
-    expect(controls.editedInteractions[0]?.content).toMatch(/ready/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
+      "<:success:1543407529302949908>",
+    );
   });
 
   test("defaults category name to Temporary Voice Channel", async () => {
@@ -128,7 +139,34 @@ describe("/setup command", () => {
     await setup.execute(baseInteraction());
 
     expect(controls.deleteCalls.length).toBeGreaterThanOrEqual(1);
-    expect(controls.editedInteractions[0]?.content).toMatch(/join-to-create voice channel/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /Error setting Join to Create System/i,
+    );
+    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
+      "<:error:1543407530380624037>",
+    );
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /Lack of permission on client or user side/i,
+    );
+  });
+
+  test("rejects create when Join to Create System already exists", async () => {
+    const { setup, controls } = createSetupDeps();
+    await setup.execute(baseInteraction());
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765433",
+        options: [{ name: "create", type: 1, options: [] }],
+      }),
+    );
+
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /Error setting Join to Create System/i,
+    );
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /Join to Create System already exists/i,
+    );
+    expect(controls.guildChannelCreates).toHaveLength(2);
   });
 
   test("factory reset deletes empty channels and config but keeps occupied rooms and category", async () => {
@@ -198,7 +236,10 @@ describe("/setup command", () => {
     expect(controls.channels.has(occupiedId)).toBe(true);
     expect(controls.channels.has(config!.categoryId)).toBe(true);
     expect(controls.editCalls.some((call) => call.channelId === config!.categoryId)).toBe(true);
-    expect(controls.editedInteractions.at(-1)?.content).toMatch(/Factory reset complete/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
+      "<:success:1543407529302949908>",
+    );
     expect(discord).toBeDefined();
   });
 

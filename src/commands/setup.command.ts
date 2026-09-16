@@ -1,6 +1,7 @@
 import { ApplicationCommandOptionTypes, type CreateApplicationCommand } from "discordeno";
 
 import type { CommandModule } from "../handlers/types.ts";
+import { failureResponse } from "../lib/j2c/action-response.ts";
 
 const setupCommandData: CreateApplicationCommand = {
   name: "setup",
@@ -74,7 +75,8 @@ const setupCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        content: "Setup is not ready yet.",
+        embeds: failureResponse("Error setting Join to Create System", "Setup is not ready yet.")
+          .embeds,
         ephemeral: true,
       });
       return;

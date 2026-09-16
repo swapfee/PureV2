@@ -1,5 +1,6 @@
 import type { CommandRegistry, EventContext, EventRegistry, InteractionDispatcher } from "../../handlers/types.ts";
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
+import { failureResponse } from "../j2c/action-response.ts";
 import type { Logger } from "../logger.ts";
 import type {
   DiscordApiPort,
@@ -98,7 +99,10 @@ export function createInteractionDispatcher(
           await discord.respondToInteraction({
             interactionId: interaction.id,
             interactionToken: interaction.token,
-            content: `Please wait ${Math.ceil(decision.remainingMs / 1000)}s before using this command again.`,
+            embeds: failureResponse(
+              "Action Failed",
+              `Please wait ${Math.ceil(decision.remainingMs / 1000)}s before using this command again.`,
+            ).embeds,
             ephemeral: true,
           });
           return;

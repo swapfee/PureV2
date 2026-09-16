@@ -41,11 +41,25 @@ export interface RuntimeEventMap {
 
 export type RuntimeEventName = keyof RuntimeEventMap;
 
+export interface InteractionEmbed {
+  readonly description: string;
+  readonly color?: number;
+  readonly title?: string;
+}
+
 export interface InteractionResponseRequest {
   readonly interactionId: string;
   readonly interactionToken: string;
-  readonly content: string;
+  readonly content?: string;
+  readonly embeds?: readonly InteractionEmbed[];
   readonly ephemeral?: boolean;
+}
+
+export interface EditInteractionResponseRequest {
+  readonly applicationId: string;
+  readonly interactionToken: string;
+  readonly content?: string;
+  readonly embeds?: readonly InteractionEmbed[];
 }
 
 export interface PermissionOverwrite {
@@ -101,11 +115,7 @@ export interface DiscordApiPort {
     readonly interactionToken: string;
     readonly ephemeral?: boolean;
   }): Promise<void>;
-  editInteractionResponse(request: {
-    readonly applicationId: string;
-    readonly interactionToken: string;
-    readonly content: string;
-  }): Promise<void>;
+  editInteractionResponse(request: EditInteractionResponseRequest): Promise<void>;
   createVoiceChannel(
     request: CreateVoiceChannelRequest,
   ): Promise<DiscordValueResult<{ readonly id: string }>>;
