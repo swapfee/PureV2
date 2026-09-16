@@ -26,6 +26,8 @@ import {
   isViewDenied,
   setEveryoneConnectDenied,
   setEveryoneViewDenied,
+  temporaryChannelLockMatches,
+  temporaryChannelVisibilityMatches,
 } from "./voice-controls.ts";
 
 const OWNER_ACTIONS = new Set<VoicePanelAction>([
@@ -345,11 +347,31 @@ async function handlePanelButton(input: {
       );
       return;
     }
+    const wantLocked = action === "lock";
+    if (
+      temporaryChannelLockMatches(
+        access.record,
+        channel.value.permissionOverwrites,
+        access.record.guildId,
+        wantLocked,
+      )
+    ) {
+      await replyEphemeral(
+        input.discord,
+        input.interaction,
+        input.replyState,
+        failureResponse(
+          wantLocked ? "Lock Failed" : "Unlock Failed",
+          wantLocked ? "The channel is already locked." : "The channel is already unlocked.",
+        ),
+      );
+      return;
+    }
     const result = await setEveryoneConnectDenied({
       discord: input.discord,
       channel: channel.value,
       everyoneId: access.record.guildId,
-      denied: action === "lock",
+      denied: wantLocked,
       requestId: `panel:${action}:${input.interaction.id}`,
       reason: `panel ${action}`,
     });
@@ -362,12 +384,12 @@ async function handlePanelButton(input: {
       );
       return;
     }
-    await input.channels.setLocked(channelId, action === "lock");
+    await input.channels.setLocked(channelId, wantLocked);
     await replyEphemeral(
       input.discord,
       input.interaction,
       input.replyState,
-      successResponse(action === "lock" ? "Channel locked." : "Channel unlocked."),
+      successResponse(wantLocked ? "Channel locked." : "Channel unlocked."),
     );
     return;
   }
@@ -383,11 +405,30 @@ async function handlePanelButton(input: {
       );
       return;
     }
+    const wantHidden = action === "hide";
+    if (
+      temporaryChannelVisibilityMatches(
+        channel.value.permissionOverwrites,
+        access.record.guildId,
+        wantHidden,
+      )
+    ) {
+      await replyEphemeral(
+        input.discord,
+        input.interaction,
+        input.replyState,
+        failureResponse(
+          wantHidden ? "Hide Failed" : "Unhide Failed",
+          wantHidden ? "The channel is already hidden." : "The channel is already visible.",
+        ),
+      );
+      return;
+    }
     const result = await setEveryoneViewDenied({
       discord: input.discord,
       channel: channel.value,
       everyoneId: access.record.guildId,
-      denied: action === "hide",
+      denied: wantHidden,
       requestId: `panel:${action}:${input.interaction.id}`,
       reason: `panel ${action}`,
     });
@@ -404,7 +445,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      successResponse(action === "hide" ? "Channel hidden." : "Channel visible again."),
+      successResponse(wantHidden ? "Channel hidden." : "Channel visible again."),
     );
     return;
   }
@@ -579,7 +620,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Rename Failed", "That is already the channel name."),
+        failureResponse("Rename Failed", `The channel is already named \`${name}\`.`),
       );
       return;
     }
@@ -626,6 +667,24 @@ async function handleModalSubmit(input: {
         failureResponse("Limit Failed", "Limit must be an integer from 0 to 99."),
       );
       return;
+    }
+    const channel = await input.discord.getChannel({ channelId });
+    if (channel.kind === "found") {
+      const current = channel.value.userLimit ?? 0;
+      if (current === amount) {
+        await replyEphemeral(
+          input.discord,
+          input.interaction,
+          input.replyState,
+          failureResponse(
+            "Limit Failed",
+            amount === 0
+              ? "The channel limit is already unlimited."
+              : `The channel limit is already ${amount}.`,
+          ),
+        );
+        return;
+      }
     }
     const result = await input.discord.editChannel({
       channelId,

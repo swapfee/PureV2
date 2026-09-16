@@ -13,10 +13,14 @@ import {
   channelInviteLink,
   isConnectDenied,
   isViewDenied,
+  memberAlreadyPermitted,
+  memberAlreadyRejected,
   permitMember,
   rejectMember,
   setEveryoneConnectDenied,
   setEveryoneViewDenied,
+  temporaryChannelLockMatches,
+  temporaryChannelVisibilityMatches,
 } from "./voice-controls.ts";
 import { refreshVoiceControlPanel } from "./voice-panel-service.ts";
 
@@ -341,7 +345,7 @@ export function createVcCommandService(options: {
             await reply(
               interaction,
               deferred,
-              failureResponse("Rename Failed", "That is already the channel name."),
+              failureResponse("Rename Failed", `The channel is already named \`${name}\`.`),
             );
             return;
           }
@@ -384,7 +388,12 @@ export function createVcCommandService(options: {
             await reply(
               interaction,
               deferred,
-              failureResponse("Limit Failed", "That is already the channel limit."),
+              failureResponse(
+                "Limit Failed",
+                amount === 0
+                  ? "The channel limit is already unlimited."
+                  : `The channel limit is already ${amount}.`,
+              ),
             );
             return;
           }
@@ -425,13 +434,35 @@ export function createVcCommandService(options: {
             );
             return;
           }
+          const wantLocked = subcommand === "lock";
+          if (
+            temporaryChannelLockMatches(
+              auth.channel,
+              channel.value.permissionOverwrites,
+              auth.channel.guildId,
+              wantLocked,
+            )
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(
+                wantLocked ? "Lock Failed" : "Unlock Failed",
+                wantLocked
+                  ? "The channel is already locked."
+                  : "The channel is already unlocked.",
+              ),
+            );
+            return;
+          }
           const result = await setEveryoneConnectDenied({
             discord: options.discord,
             channel: channel.value,
             everyoneId: auth.channel.guildId,
-            denied: subcommand === "lock",
+            denied: wantLocked,
             requestId,
-            reason: subcommand === "lock" ? "vc lock" : "vc unlock",
+            reason: wantLocked ? "vc lock" : "vc unlock",
           });
           if (result.kind !== "ok") {
             options.metrics.restFailure();
@@ -440,16 +471,16 @@ export function createVcCommandService(options: {
               interaction,
               deferred,
               failureResponse(
-                subcommand === "lock" ? "Lock Failed" : "Unlock Failed",
+                wantLocked ? "Lock Failed" : "Unlock Failed",
                 `Could not ${subcommand} the channel.`,
               ),
             );
             return;
           }
-          await options.channels.setLocked(auth.channel.channelId, subcommand === "lock");
+          await options.channels.setLocked(auth.channel.channelId, wantLocked);
           await succeed(
-            subcommand === "lock" ? "Lock Complete" : "Unlock Complete",
-            subcommand === "lock" ? "Channel locked." : "Channel unlocked.",
+            wantLocked ? "Lock Complete" : "Unlock Complete",
+            wantLocked ? "Channel locked." : "Channel unlocked.",
           );
           return;
         }
@@ -468,13 +499,34 @@ export function createVcCommandService(options: {
             );
             return;
           }
+          const wantHidden = subcommand === "hide";
+          if (
+            temporaryChannelVisibilityMatches(
+              channel.value.permissionOverwrites,
+              auth.channel.guildId,
+              wantHidden,
+            )
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(
+                wantHidden ? "Hide Failed" : "Unhide Failed",
+                wantHidden
+                  ? "The channel is already hidden."
+                  : "The channel is already visible.",
+              ),
+            );
+            return;
+          }
           const result = await setEveryoneViewDenied({
             discord: options.discord,
             channel: channel.value,
             everyoneId: auth.channel.guildId,
-            denied: subcommand === "hide",
+            denied: wantHidden,
             requestId,
-            reason: subcommand === "hide" ? "vc hide" : "vc unhide",
+            reason: wantHidden ? "vc hide" : "vc unhide",
           });
           if (result.kind !== "ok") {
             options.metrics.restFailure();
@@ -483,15 +535,15 @@ export function createVcCommandService(options: {
               interaction,
               deferred,
               failureResponse(
-                subcommand === "hide" ? "Hide Failed" : "Unhide Failed",
+                wantHidden ? "Hide Failed" : "Unhide Failed",
                 `Could not ${subcommand} the channel.`,
               ),
             );
             return;
           }
           await succeed(
-            subcommand === "hide" ? "Hide Complete" : "Unhide Complete",
-            subcommand === "hide" ? "Channel hidden." : "Channel visible again.",
+            wantHidden ? "Hide Complete" : "Unhide Complete",
+            wantHidden ? "Channel hidden." : "Channel visible again.",
           );
           return;
         }
@@ -526,6 +578,21 @@ export function createVcCommandService(options: {
               interaction,
               deferred,
               failureResponse("Permit Failed", "Could not load channel permissions."),
+            );
+            return;
+          }
+          if (
+            memberAlreadyPermitted(
+              channel.value.permissionOverwrites,
+              targetUserId,
+              auth.channel.rejectedUserIds,
+            )
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("Permit Failed", "The member is already permitted."),
             );
             return;
           }
@@ -567,6 +634,28 @@ export function createVcCommandService(options: {
               interaction,
               deferred,
               failureResponse("Reject Failed", "Could not load channel permissions."),
+            );
+            return;
+          }
+          const targetVoice = await options.discord.getUserVoiceChannel({
+            guildId: auth.channel.guildId,
+            userId: targetUserId,
+          });
+          const connectedToChannel =
+            targetVoice.kind === "found" && targetVoice.value.channelId === auth.channel.channelId;
+          if (
+            memberAlreadyRejected(
+              channel.value.permissionOverwrites,
+              targetUserId,
+              auth.channel.rejectedUserIds,
+              connectedToChannel,
+            )
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("Reject Failed", "The member is already rejected."),
             );
             return;
           }

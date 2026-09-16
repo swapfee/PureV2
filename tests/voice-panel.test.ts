@@ -297,6 +297,14 @@ describe("voice panel interactions", () => {
     expect(record?.locked).toBe(true);
     expect(controls.overwriteCalls.some((call) => call.overwriteId === guildId)).toBe(true);
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain("Channel locked");
+
+    await handler.execute(
+      interaction({
+        id: "500000000000000099",
+        customId: `${VOICE_PANEL_PREFIX}:lock:${channelId}:${ownerId}`,
+      }),
+    );
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toMatch(/already locked/i);
   });
 
   test("opens rename modal for owner", async () => {

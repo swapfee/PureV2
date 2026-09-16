@@ -410,9 +410,12 @@ describe("/vc command family", () => {
   });
 
   test("lock unlock hide and unhide update overwrites and locked flag", async () => {
-    const { vc, controls, channels } = await setup();
+    const { vc, controls, channels, metrics, cooldowns } = await setup();
     await vc.execute(interaction({ id: "lock-1", guildId, options: [{ name: "lock", type: 1 }] }));
+    cooldowns.clear();
     await vc.execute(interaction({ id: "lock-2", guildId, options: [{ name: "lock", type: 1 }] }));
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already locked/i);
+    expect(metrics.snapshot().validationFailures).toBeGreaterThanOrEqual(1);
     const locked = controls.channels.get(channelId)!;
     const everyone = locked.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
     expect((BigInt(everyone.deny) & BitwisePermissionFlags.CONNECT) !== 0n).toBe(true);
@@ -420,18 +423,107 @@ describe("/vc command family", () => {
     const invite = locked.permissionOverwrites.find((overwrite) => overwrite.id === targetId)!;
     expect((BigInt(invite.allow) & BitwisePermissionFlags.STREAM) !== 0n).toBe(true);
 
+    cooldowns.clear();
     await vc.execute(interaction({ id: "unlock-1", guildId, options: [{ name: "unlock", type: 1 }] }));
     expect((await channels.findByChannelId(channelId))?.locked).toBe(false);
+    cooldowns.clear();
+    await vc.execute(interaction({ id: "unlock-2", guildId, options: [{ name: "unlock", type: 1 }] }));
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already unlocked/i);
 
+    cooldowns.clear();
     await vc.execute(interaction({ id: "hide-1", guildId, options: [{ name: "hide", type: 1 }] }));
     const hidden = controls.channels.get(channelId)!;
     const everyoneHidden = hidden.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
     expect((BigInt(everyoneHidden.deny) & BitwisePermissionFlags.VIEW_CHANNEL) !== 0n).toBe(true);
+    cooldowns.clear();
+    await vc.execute(interaction({ id: "hide-2", guildId, options: [{ name: "hide", type: 1 }] }));
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already hidden/i);
 
+    cooldowns.clear();
     await vc.execute(interaction({ id: "unhide-1", guildId, options: [{ name: "unhide", type: 1 }] }));
     const unhidden = controls.channels.get(channelId)!;
     const everyoneVisible = unhidden.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
     expect((BigInt(everyoneVisible.deny) & BitwisePermissionFlags.VIEW_CHANNEL) === 0n).toBe(true);
+    cooldowns.clear();
+    await vc.execute(interaction({ id: "unhide-2", guildId, options: [{ name: "unhide", type: 1 }] }));
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already visible/i);
+  });
+
+  test("permit and reject report already-applied member state", async () => {
+    const { vc, controls, channels, cooldowns } = await setup();
+
+    await vc.execute(
+      interaction({
+        id: "permit-first",
+        guildId,
+        options: [
+          {
+            name: "permit",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "permit-again",
+        guildId,
+        options: [
+          {
+            name: "permit",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already permitted/i);
+
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "reject-first",
+        guildId,
+        options: [
+          {
+            name: "reject",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect((await channels.findByChannelId(channelId))?.rejectedUserIds).toContain(targetId);
+
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "reject-again",
+        guildId,
+        options: [
+          {
+            name: "reject",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already rejected/i);
+  });
+
+  test("lock still repairs when Mongo and Discord disagree", async () => {
+    const { vc, controls, channels } = await setup();
+    await channels.setLocked(channelId, true);
+    // Discord still unlocked — should not treat as already locked.
+    await vc.execute(interaction({ id: "lock-repair", guildId, options: [{ name: "lock", type: 1 }] }));
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Channel locked/i);
+    const everyone = controls.channels.get(channelId)!.permissionOverwrites.find(
+      (overwrite) => overwrite.id === guildId,
+    )!;
+    expect((BigInt(everyone.deny) & BitwisePermissionFlags.CONNECT) !== 0n).toBe(true);
   });
 
   test("reject stores denial disconnects and permit clears reject list", async () => {
