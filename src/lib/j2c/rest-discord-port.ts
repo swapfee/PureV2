@@ -150,5 +150,9 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
         return toDiscordOperationResult(error);
       }
     },
+
+    async sendDirectMessage() {
+      throw new Error("sendDirectMessage is not available on the coordinator Discord port");
+    },
   };
 }

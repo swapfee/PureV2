@@ -1,5 +1,17 @@
 /** Bounded-cardinality metrics for /vc management commands. */
-export type VcSubcommand = "invite" | "rename" | "limit" | "lock" | "unlock";
+export type VcSubcommand =
+  | "invite"
+  | "rename"
+  | "limit"
+  | "lock"
+  | "unlock"
+  | "hide"
+  | "unhide"
+  | "permit"
+  | "reject"
+  | "transfer"
+  | "info"
+  | "delete";
 
 export interface VcMetricsSnapshot {
   readonly attempts: Readonly<Record<VcSubcommand, number>>;
@@ -23,7 +35,20 @@ export interface VcMetrics {
 }
 
 function emptySubcounts(): Record<VcSubcommand, number> {
-  return { invite: 0, rename: 0, limit: 0, lock: 0, unlock: 0 };
+  return {
+    invite: 0,
+    rename: 0,
+    limit: 0,
+    lock: 0,
+    unlock: 0,
+    hide: 0,
+    unhide: 0,
+    permit: 0,
+    reject: 0,
+    transfer: 0,
+    info: 0,
+    delete: 0,
+  };
 }
 
 export function createVcMetrics(): VcMetrics {

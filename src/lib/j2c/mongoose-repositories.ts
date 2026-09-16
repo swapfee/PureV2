@@ -50,6 +50,8 @@ function toTempRecord(doc: {
   reservationId: string;
   creationRequestId: string;
   occupantIds: string[];
+  locked?: boolean | null;
+  rejectedUserIds?: string[] | null;
   emptySince?: Date | null;
   deletionAttemptedAt?: Date | null;
   deletionRequestId?: string | null;
@@ -66,6 +68,8 @@ function toTempRecord(doc: {
     reservationId: doc.reservationId,
     creationRequestId: doc.creationRequestId,
     occupantIds: [...doc.occupantIds],
+    locked: doc.locked === true,
+    rejectedUserIds: [...(doc.rejectedUserIds ?? [])],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     ...(doc.emptySince ? { emptySince: doc.emptySince } : {}),
@@ -162,6 +166,8 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         reservationId: input.reservationId,
         creationRequestId: input.creationRequestId,
         occupantIds: [...(input.occupantIds ?? [])],
+        locked: false,
+        rejectedUserIds: [],
       });
       return toTempRecord(doc.toObject());
     },
@@ -259,6 +265,61 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId },
         { $set: { status: "stale", lastError } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async setLocked(channelId, locked) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        { $set: { locked } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async addRejectedUser(channelId, userId) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        { $addToSet: { rejectedUserIds: userId } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async removeRejectedUser(channelId, userId) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        { $pull: { rejectedUserIds: userId } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async transferOwner(channelId, newOwnerId) {
+      const current = await TemporaryChannelModel.findOne({ channelId, status: "active" }).lean().exec();
+      if (!current) return undefined;
+      const conflict = await TemporaryChannelModel.findOne({
+        guildId: current.guildId,
+        ownerId: newOwnerId,
+        status: { $in: ["creating", "active", "deleting"] },
+        channelId: { $ne: channelId },
+      })
+        .lean()
+        .exec();
+      if (conflict) return undefined;
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        { $set: { ownerId: newOwnerId } },
         { new: true },
       )
         .lean()

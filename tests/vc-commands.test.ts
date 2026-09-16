@@ -73,6 +73,7 @@ async function setup() {
     id: channelId,
     name: "owner-room",
     guildId,
+    userLimit: 0,
     permissionOverwrites: [
       { id: guildId, type: 0, allow: "0", deny: "0" },
       {
@@ -156,18 +157,18 @@ describe("/vc command family", () => {
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
-  test("owner invite preserves unrelated overwrite bits and rejects self/bots", async () => {
+  test("owner permit preserves unrelated overwrite bits and rejects self/bots", async () => {
     const { vc, controls, metrics } = await setup();
 
     await vc.execute(
       interaction({
-        id: "invite-self",
+        id: "permit-self",
         guildId,
         options: [
           {
-            name: "invite",
+            name: "permit",
             type: 1,
-            options: [{ name: "user", type: 6, value: ownerId }],
+            options: [{ name: "member", type: 6, value: ownerId }],
           },
         ],
       }),
@@ -176,13 +177,13 @@ describe("/vc command family", () => {
 
     await vc.execute(
       interaction({
-        id: "invite-bot",
+        id: "permit-bot",
         guildId,
         options: [
           {
-            name: "invite",
+            name: "permit",
             type: 1,
-            options: [{ name: "user", type: 6, value: botUserId }],
+            options: [{ name: "member", type: 6, value: botUserId }],
           },
         ],
       }),
@@ -191,23 +192,82 @@ describe("/vc command family", () => {
 
     await vc.execute(
       interaction({
-        id: "invite-ok",
+        id: "permit-ok",
         guildId,
         options: [
           {
-            name: "invite",
+            name: "permit",
             type: 1,
-            options: [{ name: "user", type: 6, value: targetId }],
+            options: [{ name: "member", type: 6, value: targetId }],
           },
         ],
       }),
     );
-    const call = controls.overwriteCalls.find((entry) => entry.requestId === "vc:invite:invite-ok");
+    const call = controls.overwriteCalls.find((entry) => entry.requestId === "vc:permit:permit-ok");
     expect(call).toBeDefined();
     const allow = BigInt(call!.allow);
     expect((allow & BitwisePermissionFlags.VIEW_CHANNEL) !== 0n).toBe(true);
     expect((allow & BitwisePermissionFlags.CONNECT) !== 0n).toBe(true);
     expect((allow & BitwisePermissionFlags.STREAM) !== 0n).toBe(true);
+    expect(metrics.snapshot().successes.permit).toBe(1);
+  });
+
+  test("invite sends a DM link for connected members", async () => {
+    const { vc, controls, metrics, channels } = await setup();
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+    await channels.setOccupants(channelId, [ownerId, targetId], null);
+
+    await vc.execute(
+      interaction({
+        id: "invite-self",
+        guildId,
+        userId: targetId,
+        options: [
+          {
+            name: "invite",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/yourself/i);
+
+    await vc.execute(
+      interaction({
+        id: "invite-ok",
+        guildId,
+        userId: targetId,
+        options: [
+          {
+            name: "invite",
+            type: 1,
+            options: [{ name: "member", type: 6, value: ownerId }],
+          },
+        ],
+      }),
+    );
+    // owner is already connected — refuse
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already connected/i);
+
+    const outsider = "666666666666666666";
+    controls.users.set(outsider, { id: outsider, bot: false });
+    await vc.execute(
+      interaction({
+        id: "invite-dm",
+        guildId,
+        userId: targetId,
+        options: [
+          {
+            name: "invite",
+            type: 1,
+            options: [{ name: "member", type: 6, value: outsider }],
+          },
+        ],
+      }),
+    );
+    expect(controls.dmCalls.at(-1)?.userId).toBe(outsider);
+    expect(controls.dmCalls.at(-1)?.content).toContain(channelId);
     expect(metrics.snapshot().successes.invite).toBe(1);
   });
 
@@ -273,7 +333,7 @@ describe("/vc command family", () => {
           {
             name: "limit",
             type: 1,
-            options: [{ name: "amount", type: 4, value: -1 }],
+            options: [{ name: "limit", type: 4, value: -1 }],
           },
         ],
       }),
@@ -282,37 +342,157 @@ describe("/vc command family", () => {
 
     await vc.execute(
       interaction({
-        id: "limit-zero",
+        id: "limit-five",
         guildId,
         options: [
           {
             name: "limit",
             type: 1,
-            options: [{ name: "amount", type: 4, value: 0 }],
+            options: [{ name: "limit", type: 4, value: 5 }],
           },
         ],
       }),
     );
-    expect(controls.editCalls.at(-1)?.userLimit).toBe(0);
-    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/removed/i);
+    expect(controls.editCalls.at(-1)?.userLimit).toBe(5);
+
+    const again = await setup();
+    again.controls.channels.get(channelId)!.userLimit = 5;
+    await again.vc.execute(
+      interaction({
+        id: "limit-clear",
+        guildId,
+        options: [
+          {
+            name: "limit",
+            type: 1,
+            options: [{ name: "limit", type: 4, value: 0 }],
+          },
+        ],
+      }),
+    );
+    expect(again.controls.editCalls.at(-1)?.userLimit).toBe(0);
+    expect(embedText(again.controls.editedInteractions.at(-1))).toMatch(/removed/i);
   });
 
-  test("lock and unlock are idempotent and preserve invitations", async () => {
-    const { vc, controls } = await setup();
+  test("lock unlock hide and unhide update overwrites and locked flag", async () => {
+    const { vc, controls, channels } = await setup();
     await vc.execute(interaction({ id: "lock-1", guildId, options: [{ name: "lock", type: 1 }] }));
     await vc.execute(interaction({ id: "lock-2", guildId, options: [{ name: "lock", type: 1 }] }));
     const locked = controls.channels.get(channelId)!;
     const everyone = locked.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
     expect((BigInt(everyone.deny) & BitwisePermissionFlags.CONNECT) !== 0n).toBe(true);
+    expect((await channels.findByChannelId(channelId))?.locked).toBe(true);
     const invite = locked.permissionOverwrites.find((overwrite) => overwrite.id === targetId)!;
     expect((BigInt(invite.allow) & BitwisePermissionFlags.STREAM) !== 0n).toBe(true);
 
     await vc.execute(interaction({ id: "unlock-1", guildId, options: [{ name: "unlock", type: 1 }] }));
-    await vc.execute(interaction({ id: "unlock-2", guildId, options: [{ name: "unlock", type: 1 }] }));
-    const unlocked = controls.channels.get(channelId)!;
-    const everyoneAfter = unlocked.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
-    expect((BigInt(everyoneAfter.deny) & BitwisePermissionFlags.CONNECT) === 0n).toBe(true);
-    expect(unlocked.permissionOverwrites.find((overwrite) => overwrite.id === targetId)).toBeDefined();
+    expect((await channels.findByChannelId(channelId))?.locked).toBe(false);
+
+    await vc.execute(interaction({ id: "hide-1", guildId, options: [{ name: "hide", type: 1 }] }));
+    const hidden = controls.channels.get(channelId)!;
+    const everyoneHidden = hidden.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
+    expect((BigInt(everyoneHidden.deny) & BitwisePermissionFlags.VIEW_CHANNEL) !== 0n).toBe(true);
+
+    await vc.execute(interaction({ id: "unhide-1", guildId, options: [{ name: "unhide", type: 1 }] }));
+    const unhidden = controls.channels.get(channelId)!;
+    const everyoneVisible = unhidden.permissionOverwrites.find((overwrite) => overwrite.id === guildId)!;
+    expect((BigInt(everyoneVisible.deny) & BitwisePermissionFlags.VIEW_CHANNEL) === 0n).toBe(true);
+  });
+
+  test("reject stores denial disconnects and permit clears reject list", async () => {
+    const { vc, controls, channels } = await setup();
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+
+    await vc.execute(
+      interaction({
+        id: "reject-1",
+        guildId,
+        options: [
+          {
+            name: "reject",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.rejectedUserIds).toContain(targetId);
+    expect(controls.moveCalls.some((call) => call.userId === targetId && call.channelId === null)).toBe(
+      true,
+    );
+
+    await vc.execute(
+      interaction({
+        id: "permit-1",
+        guildId,
+        options: [
+          {
+            name: "permit",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect((await channels.findByChannelId(channelId))?.rejectedUserIds).not.toContain(targetId);
+  });
+
+  test("transfer requires connected non-bot member and updates owner", async () => {
+    const { vc, channels } = await setup();
+    await vc.execute(
+      interaction({
+        id: "transfer-absent",
+        guildId,
+        options: [
+          {
+            name: "transfer",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect((await channels.findByChannelId(channelId))?.ownerId).toBe(ownerId);
+
+    const { vc: vc2, controls, channels: channels2 } = await setup();
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+    await vc2.execute(
+      interaction({
+        id: "transfer-ok",
+        guildId,
+        options: [
+          {
+            name: "transfer",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect((await channels2.findByChannelId(channelId))?.ownerId).toBe(targetId);
+  });
+
+  test("info works for connected non-owner and delete removes channel", async () => {
+    const { vc, controls, channels, metrics } = await setup();
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+    await channels.setOccupants(channelId, [ownerId, targetId], null);
+
+    await vc.execute(
+      interaction({
+        id: "info-1",
+        guildId,
+        userId: targetId,
+        options: [{ name: "info", type: 1 }],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Channel Info/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toContain(ownerId);
+    expect(metrics.snapshot().successes.info).toBe(1);
+
+    await vc.execute(interaction({ id: "delete-1", guildId, options: [{ name: "delete", type: 1 }] }));
+    expect(controls.deleteCalls.some((call) => call.channelId === channelId)).toBe(true);
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
   });
 
   test("replays do not mutate twice and defer before work", async () => {

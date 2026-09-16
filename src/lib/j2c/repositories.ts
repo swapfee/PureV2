@@ -41,6 +41,13 @@ export interface TemporaryChannelRepository {
     attemptedAt: Date,
   ): Promise<TemporaryChannelRecord | undefined>;
   markStale(channelId: string, lastError: string): Promise<TemporaryChannelRecord | undefined>;
+  setLocked(channelId: string, locked: boolean): Promise<TemporaryChannelRecord | undefined>;
+  addRejectedUser(channelId: string, userId: string): Promise<TemporaryChannelRecord | undefined>;
+  removeRejectedUser(channelId: string, userId: string): Promise<TemporaryChannelRecord | undefined>;
+  transferOwner(
+    channelId: string,
+    newOwnerId: string,
+  ): Promise<TemporaryChannelRecord | undefined>;
   remove(channelId: string): Promise<boolean>;
 }
 

@@ -35,6 +35,16 @@ const temporaryChannelSchema = new Schema(
         message: "occupantIds must contain Discord snowflakes",
       },
     },
+    locked: { type: Boolean, required: true, default: false },
+    rejectedUserIds: {
+      type: [String],
+      required: true,
+      default: [],
+      validate: {
+        validator: (values: string[]) => values.every((value) => SNOWFLAKE_PATTERN.test(value)),
+        message: "rejectedUserIds must contain Discord snowflakes",
+      },
+    },
     emptySince: { type: Date, required: false },
     deletionAttemptedAt: { type: Date, required: false },
     deletionRequestId: { type: String, required: false, trim: true, maxlength: 80 },
@@ -82,6 +92,8 @@ export interface TemporaryChannelRecord {
   readonly reservationId: string;
   readonly creationRequestId: string;
   readonly occupantIds: readonly string[];
+  readonly locked: boolean;
+  readonly rejectedUserIds: readonly string[];
   readonly emptySince?: Date;
   readonly deletionAttemptedAt?: Date;
   readonly deletionRequestId?: string;

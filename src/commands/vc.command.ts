@@ -6,23 +6,17 @@ import {
 import type { CommandModule } from "../handlers/types.ts";
 import { failureResponse } from "../lib/j2c/action-response.ts";
 
+const memberOption = {
+  type: ApplicationCommandOptionTypes.User,
+  name: "member",
+  description: "Target member",
+  required: true,
+} as const;
+
 const vcCommandData: CreateApplicationCommand = {
   name: "vc",
   description: "Manage your temporary voice channel",
   options: [
-    {
-      type: ApplicationCommandOptionTypes.SubCommand,
-      name: "invite",
-      description: "Allow a member to view and join your channel",
-      options: [
-        {
-          type: ApplicationCommandOptionTypes.User,
-          name: "user",
-          description: "Member to invite",
-          required: true,
-        },
-      ],
-    },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
       name: "rename",
@@ -45,7 +39,7 @@ const vcCommandData: CreateApplicationCommand = {
       options: [
         {
           type: ApplicationCommandOptionTypes.Integer,
-          name: "amount",
+          name: "limit",
           description: "User limit from 0 to 99",
           required: true,
           minValue: 0,
@@ -63,11 +57,56 @@ const vcCommandData: CreateApplicationCommand = {
       name: "unlock",
       description: "Allow @everyone to join again",
     },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "hide",
+      description: "Hide the channel from @everyone",
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "unhide",
+      description: "Show the channel to @everyone again",
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "permit",
+      description: "Allow a member to view and join your channel",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "reject",
+      description: "Deny a member from this channel and disconnect them",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "transfer",
+      description: "Transfer ownership to a connected member",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "invite",
+      description: "DM a member an invite link to this channel",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "info",
+      description: "Show details about this temporary channel",
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "delete",
+      description: "Delete your temporary voice channel",
+    },
   ],
 };
 
 const vcCommand: CommandModule = {
   data: vcCommandData,
+  cooldownMs: 1_000,
   async execute(context, interaction) {
     if (!context.vc) {
       await context.discord.respondToInteraction({

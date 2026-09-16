@@ -10,6 +10,7 @@ export type VcAuthFailure =
   | "not_owner"
   | "channel_missing"
   | "owner_not_connected"
+  | "member_not_connected"
   | "voice_lookup_failed";
 
 export type VcAuthResult =
@@ -68,6 +69,53 @@ export async function authorizeVcOwner(input: {
   return { ok: true, channel: owned };
 }
 
+/**
+ * Any member currently connected to a managed temporary channel.
+ */
+export async function authorizeVcConnectedMember(input: {
+  readonly guildId: string | undefined;
+  readonly userId: string;
+  readonly channels: TemporaryChannelRepository;
+  readonly discord: DiscordApiPort;
+  readonly logger: Logger;
+}): Promise<VcAuthResult> {
+  if (!input.guildId) {
+    return { ok: false, reason: "dm_not_allowed" };
+  }
+
+  const voice = await input.discord.getUserVoiceChannel({
+    guildId: input.guildId,
+    userId: input.userId,
+  });
+  if (voice.kind !== "found") {
+    return { ok: false, reason: "voice_lookup_failed" };
+  }
+  if (!voice.value.channelId) {
+    return { ok: false, reason: "member_not_connected" };
+  }
+
+  const record = await input.channels.findByChannelId(voice.value.channelId);
+  if (!record || record.status !== "active" || record.guildId !== input.guildId) {
+    return { ok: false, reason: "member_not_connected" };
+  }
+
+  const discordChannel = await input.discord.getChannel({ channelId: record.channelId });
+  if (discordChannel.kind === "missing") {
+    return { ok: false, reason: "channel_missing" };
+  }
+  if (discordChannel.kind !== "found") {
+    input.logger.warn("VC member auth channel lookup failed", {
+      guildId: input.guildId,
+      channelId: record.channelId,
+      userId: input.userId,
+      result: discordChannel.kind,
+    });
+    return { ok: false, reason: "voice_lookup_failed" };
+  }
+
+  return { ok: true, channel: record };
+}
+
 export function vcAuthUserMessage(reason: VcAuthFailure): string {
   const messages: Record<VcAuthFailure, string> = {
     dm_not_allowed: "This command can only be used in a server.",
@@ -75,6 +123,7 @@ export function vcAuthUserMessage(reason: VcAuthFailure): string {
     not_owner: "Only the channel owner can use this command.",
     channel_missing: "Your temporary channel no longer exists.",
     owner_not_connected: "You must be connected to your temporary voice channel.",
+    member_not_connected: "You must be connected to a temporary voice channel.",
     voice_lookup_failed: "Could not verify your voice state. Try again shortly.",
   };
   return messages[reason];

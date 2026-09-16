@@ -175,8 +175,13 @@ export interface DiscordApiPort {
   moveMemberToChannel(request: {
     readonly guildId: string;
     readonly userId: string;
-    readonly channelId: string;
+    readonly channelId: string | null;
     readonly requestId: string;
     readonly reason?: string;
+  }): Promise<DiscordOperationResult>;
+  sendDirectMessage(request: {
+    readonly userId: string;
+    readonly content: string;
+    readonly requestId: string;
   }): Promise<DiscordOperationResult>;
 }

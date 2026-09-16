@@ -27,7 +27,8 @@ export interface FakeDiscordControls {
   readonly createCalls: CreateVoiceChannelRequest[];
   readonly guildChannelCreates: CreateGuildChannelRequest[];
   readonly deleteCalls: { channelId: string; requestId: string }[];
-  readonly moveCalls: { guildId: string; userId: string; channelId: string; requestId: string }[];
+  readonly moveCalls: { guildId: string; userId: string; channelId: string | null; requestId: string }[];
+  readonly dmCalls: { userId: string; content: string; requestId: string }[];
   readonly editCalls: { channelId: string; requestId: string; name?: string; userLimit?: number }[];
   readonly overwriteCalls: {
     channelId: string;
@@ -72,6 +73,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     guildChannelCreates: [],
     deleteCalls: [],
     moveCalls: [],
+    dmCalls: [],
     editCalls: [],
     overwriteCalls: [],
     deferredInteractions: [],
@@ -274,6 +276,15 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         return result;
       }
       controls.voiceByUser.set(`${request.guildId}:${request.userId}`, request.channelId);
+      return { kind: "ok" };
+    },
+
+    async sendDirectMessage(request) {
+      controls.dmCalls.push({
+        userId: request.userId,
+        content: request.content,
+        requestId: request.requestId,
+      });
       return { kind: "ok" };
     },
   };

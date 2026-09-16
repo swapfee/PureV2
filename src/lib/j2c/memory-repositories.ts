@@ -24,6 +24,7 @@ function cloneTemp(record: TemporaryChannelRecord): TemporaryChannelRecord {
   return {
     ...record,
     occupantIds: [...record.occupantIds],
+    rejectedUserIds: [...record.rejectedUserIds],
     createdAt: new Date(record.createdAt),
     updatedAt: new Date(record.updatedAt),
     ...(record.emptySince ? { emptySince: new Date(record.emptySince) } : {}),
@@ -107,6 +108,8 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         reservationId: input.reservationId,
         creationRequestId: input.creationRequestId,
         occupantIds: [...(input.occupantIds ?? [])],
+        locked: false,
+        rejectedUserIds: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -193,6 +196,8 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         reservationId: existing.reservationId,
         creationRequestId: existing.creationRequestId,
         occupantIds: [...occupantIds],
+        locked: existing.locked,
+        rejectedUserIds: [...existing.rejectedUserIds],
         createdAt: existing.createdAt,
         updatedAt: new Date(),
         ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
@@ -209,6 +214,8 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       if (!existing || existing.status !== "active") return undefined;
       const next: TemporaryChannelRecord = {
         ...existing,
+        rejectedUserIds: [...existing.rejectedUserIds],
+        occupantIds: [...existing.occupantIds],
         status: "deleting",
         deletionRequestId,
         deletionAttemptedAt: attemptedAt,
@@ -223,8 +230,76 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       if (!existing) return undefined;
       const next: TemporaryChannelRecord = {
         ...existing,
+        rejectedUserIds: [...existing.rejectedUserIds],
+        occupantIds: [...existing.occupantIds],
         status: "stale",
         lastError,
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async setLocked(channelId, locked) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        rejectedUserIds: [...existing.rejectedUserIds],
+        occupantIds: [...existing.occupantIds],
+        locked,
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async addRejectedUser(channelId, userId) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      if (existing.rejectedUserIds.includes(userId)) return cloneTemp(existing);
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: [...existing.rejectedUserIds, userId],
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async removeRejectedUser(channelId, userId) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      if (!existing.rejectedUserIds.includes(userId)) return cloneTemp(existing);
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: existing.rejectedUserIds.filter((id) => id !== userId),
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async transferOwner(channelId, newOwnerId) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      for (const record of byChannel.values()) {
+        if (
+          record.channelId !== channelId &&
+          record.guildId === existing.guildId &&
+          record.ownerId === newOwnerId &&
+          (record.status === "creating" || record.status === "active" || record.status === "deleting")
+        ) {
+          return undefined;
+        }
+      }
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: [...existing.rejectedUserIds],
+        ownerId: newOwnerId,
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);

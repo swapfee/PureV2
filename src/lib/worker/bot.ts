@@ -351,6 +351,18 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         return toDiscordOperationResult(error);
       }
     },
+
+    async sendDirectMessage(request) {
+      try {
+        const dm = await bot.helpers.getDmChannel(request.userId);
+        await bot.helpers.sendMessage(String(dm.id), {
+          content: request.content,
+        });
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
   };
 
   return { bot, discord };

@@ -52,8 +52,9 @@ function formatActionDescription(
 ): string {
   const head = `${emoji} ${ensureTerminalPunctuation(message)}`;
   if (details === undefined) return head;
-  const body = Array.isArray(details)
-    ? details.map((line) => ensureTerminalPunctuation(line)).filter((line) => line.length > 0).join("\n")
-    : ensureTerminalPunctuation(details);
+  const body =
+    typeof details === "string"
+      ? ensureTerminalPunctuation(details)
+      : details.map((line) => ensureTerminalPunctuation(line)).filter((line) => line.length > 0).join("\n");
   return body.length > 0 ? `${head}\n${body}` : head;
 }
