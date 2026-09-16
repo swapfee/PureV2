@@ -72,6 +72,34 @@ function mapInteractionOption(option: {
   };
 }
 
+function extractModalComponentValues(
+  components: readonly {
+    readonly customId?: string;
+    readonly value?: string;
+    readonly components?: readonly {
+      readonly customId?: string;
+      readonly value?: string;
+      readonly components?: readonly {
+        readonly customId?: string;
+        readonly value?: string;
+      }[];
+    }[];
+  }[] | undefined,
+): Record<string, string> | undefined {
+  if (!components || components.length === 0) return undefined;
+  const values: Record<string, string> = {};
+  const visit = (nodes: typeof components): void => {
+    for (const node of nodes) {
+      if (node.customId !== undefined && node.value !== undefined) {
+        values[node.customId] = node.value;
+      }
+      if (node.components) visit(node.components);
+    }
+  };
+  visit(components);
+  return Object.keys(values).length > 0 ? values : undefined;
+}
+
 export function createInteractionDispatcher(
   commands: CommandRegistry,
   cooldowns: CooldownStore,
@@ -81,10 +109,19 @@ export function createInteractionDispatcher(
   services?: {
     readonly vc?: { execute(interaction: InteractionCreatePayload): Promise<void> };
     readonly setup?: { execute(interaction: InteractionCreatePayload): Promise<void> };
+    readonly voicePanel?: {
+      handles(interaction: InteractionCreatePayload): boolean;
+      execute(interaction: InteractionCreatePayload): Promise<void>;
+    };
   },
 ): InteractionDispatcher {
   return {
     async dispatch(interaction: InteractionCreatePayload): Promise<void> {
+      if (services?.voicePanel?.handles(interaction)) {
+        await services.voicePanel.execute(interaction);
+        return;
+      }
+
       if (!interaction.commandName) return;
       const command = commands.get(interaction.commandName);
       if (!command) {
@@ -157,6 +194,10 @@ export function wireBotEvents(
       Reflect.get(interaction.member ?? {}, "permissions"),
     );
 
+    const customId = interaction.data?.customId;
+    const componentValues = extractModalComponentValues(interaction.data?.components);
+    const selectedUserIds = interaction.data?.values;
+
     const payload: InteractionCreatePayload = {
       id: interaction.id.toString(),
       token: interaction.token,
@@ -168,6 +209,9 @@ export function wireBotEvents(
       ...(interaction.data?.name === undefined ? {} : { commandName: interaction.data.name }),
       ...(options === undefined ? {} : { options }),
       ...(memberPermissions === undefined ? {} : { memberPermissions }),
+      ...(customId === undefined ? {} : { customId }),
+      ...(componentValues === undefined ? {} : { componentValues }),
+      ...(selectedUserIds === undefined ? {} : { selectedUserIds }),
     };
 
     await event.execute(context, payload);

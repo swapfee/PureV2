@@ -39,22 +39,41 @@ export interface FakeDiscordControls {
     type: 0 | 1;
   }[];
   readonly deferredInteractions: string[];
+  readonly deferredUpdates: string[];
+  readonly modals: { interactionId: string; customId: string; title: string }[];
+  readonly channelMessages: {
+    channelId: string;
+    id: string;
+    components?: readonly unknown[];
+    flags?: number;
+  }[];
+  readonly editedChannelMessages: {
+    channelId: string;
+    messageId: string;
+    components?: readonly unknown[];
+    flags?: number;
+  }[];
   readonly editedInteractions: {
     token: string;
     content?: string;
     embeds?: readonly { description: string; color?: number; title?: string }[];
+    components?: readonly unknown[];
   }[];
   readonly responses: {
     interactionId: string;
     content?: string;
     embeds?: readonly { description: string; color?: number; title?: string }[];
+    components?: readonly unknown[];
   }[];
+  currentUser?: { id: string; username: string };
+  messageSequence: number;
   failNextCreate?: DiscordValueResult<{ id: string }>;
   failNextGuildChannelCreate?: DiscordValueResult<{ id: string }>;
   failNextMove?: DiscordOperationResult;
   failNextDelete?: DiscordOperationResult;
   failNextEdit?: DiscordOperationResult;
   failNextOverwrite?: DiscordOperationResult;
+  failNextSendMessage?: DiscordValueResult<{ id: string }>;
   failCompensationDeletes?: boolean;
   missingChannels: Set<string>;
   createSequence: number;
@@ -77,10 +96,16 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     editCalls: [],
     overwriteCalls: [],
     deferredInteractions: [],
+    deferredUpdates: [],
+    modals: [],
+    channelMessages: [],
+    editedChannelMessages: [],
     editedInteractions: [],
     responses: [],
+    messageSequence: seed?.messageSequence ?? 0,
     missingChannels: seed?.missingChannels ?? new Set(),
     createSequence: seed?.createSequence ?? 0,
+    ...(seed?.currentUser === undefined ? {} : { currentUser: seed.currentUser }),
     ...(seed?.failNextCreate === undefined ? {} : { failNextCreate: seed.failNextCreate }),
     ...(seed?.failNextGuildChannelCreate === undefined
       ? {}
@@ -89,6 +114,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     ...(seed?.failNextDelete === undefined ? {} : { failNextDelete: seed.failNextDelete }),
     ...(seed?.failNextEdit === undefined ? {} : { failNextEdit: seed.failNextEdit }),
     ...(seed?.failNextOverwrite === undefined ? {} : { failNextOverwrite: seed.failNextOverwrite }),
+    ...(seed?.failNextSendMessage === undefined ? {} : { failNextSendMessage: seed.failNextSendMessage }),
     ...(seed?.failCompensationDeletes === undefined
       ? {}
       : { failCompensationDeletes: seed.failCompensationDeletes }),
@@ -100,6 +126,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         interactionId: request.interactionId,
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
+        ...(request.components === undefined ? {} : { components: request.components }),
       });
     },
 
@@ -107,11 +134,24 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       controls.deferredInteractions.push(request.interactionId);
     },
 
+    async deferUpdateInteraction(request) {
+      controls.deferredUpdates.push(request.interactionId);
+    },
+
     async editInteractionResponse(request) {
       controls.editedInteractions.push({
         token: request.interactionToken,
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
+        ...(request.components === undefined ? {} : { components: request.components }),
+      });
+    },
+
+    async showModal(request) {
+      controls.modals.push({
+        interactionId: request.interactionId,
+        customId: request.customId,
+        title: request.title,
       });
     },
 
@@ -246,6 +286,11 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       return { kind: "found", value: user };
     },
 
+    async getCurrentUser() {
+      if (!controls.currentUser) return { kind: "missing" };
+      return { kind: "found", value: controls.currentUser };
+    },
+
     async getGuildMember(request) {
       const key = `${request.guildId}:${request.userId}`;
       const member = controls.members.get(key);
@@ -284,6 +329,33 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         userId: request.userId,
         content: request.content,
         requestId: request.requestId,
+      });
+      return { kind: "ok" };
+    },
+
+    async sendChannelMessage(request) {
+      if (controls.failNextSendMessage) {
+        const result = controls.failNextSendMessage;
+        delete controls.failNextSendMessage;
+        return result;
+      }
+      controls.messageSequence += 1;
+      const id = `8${String(controls.messageSequence).padStart(17, "0")}`;
+      controls.channelMessages.push({
+        channelId: request.channelId,
+        id,
+        ...(request.components === undefined ? {} : { components: request.components }),
+        ...(request.flags === undefined ? {} : { flags: request.flags }),
+      });
+      return { kind: "found", value: { id } };
+    },
+
+    async editChannelMessage(request) {
+      controls.editedChannelMessages.push({
+        channelId: request.channelId,
+        messageId: request.messageId,
+        ...(request.components === undefined ? {} : { components: request.components }),
+        ...(request.flags === undefined ? {} : { flags: request.flags }),
       });
       return { kind: "ok" };
     },

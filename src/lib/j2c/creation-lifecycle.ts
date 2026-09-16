@@ -17,6 +17,7 @@ import {
 import type { ReservationService } from "./reservation-service.ts";
 import type { Clock } from "./time.ts";
 import { systemClock } from "./time.ts";
+import { installVoiceControlPanel } from "./voice-panel-service.ts";
 
 export type CreationOutcome =
   | { readonly kind: "ignored"; readonly reason: string }
@@ -280,6 +281,28 @@ export function createCreationLifecycle(options: {
       await options.reservationService.complete(reservationId, channelId);
       options.metrics.increment("creationSuccesses");
       await refreshActiveGauge();
+
+      const botUser = await options.discord.getCurrentUser();
+      if (botUser.kind === "found") {
+        await installVoiceControlPanel({
+          discord: options.discord,
+          channels: options.channels,
+          logger: options.logger,
+          guildId: input.guildId,
+          channelId,
+          ownerId: input.memberId,
+          botUserId: botUser.value.id,
+          botUsername: botUser.value.username,
+          requestId: createReqId,
+        });
+      } else {
+        options.logger.warn("Voice panel skipped; bot user unavailable", {
+          guildId: input.guildId,
+          channelId,
+          outcome: botUser.kind,
+        });
+      }
+
       options.logger.info("Temporary channel created", {
         guildId: input.guildId,
         userId: input.memberId,

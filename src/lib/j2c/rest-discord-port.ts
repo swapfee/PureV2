@@ -29,8 +29,16 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("deferInteraction is not available on the coordinator Discord port");
     },
 
+    async deferUpdateInteraction() {
+      throw new Error("deferUpdateInteraction is not available on the coordinator Discord port");
+    },
+
     async editInteractionResponse() {
       throw new Error("editInteractionResponse is not available on the coordinator Discord port");
+    },
+
+    async showModal() {
+      throw new Error("showModal is not available on the coordinator Discord port");
     },
 
     async editChannel() {
@@ -43,6 +51,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
 
     async getUser() {
       throw new Error("getUser is not available on the coordinator Discord port");
+    },
+
+    async getCurrentUser() {
+      throw new Error("getCurrentUser is not available on the coordinator Discord port");
     },
 
     async getGuildMember() {
@@ -157,6 +169,14 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
 
     async sendDirectMessage() {
       throw new Error("sendDirectMessage is not available on the coordinator Discord port");
+    },
+
+    async sendChannelMessage() {
+      throw new Error("sendChannelMessage is not available on the coordinator Discord port");
+    },
+
+    async editChannelMessage() {
+      throw new Error("editChannelMessage is not available on the coordinator Discord port");
     },
   };
 }

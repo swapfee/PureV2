@@ -48,6 +48,15 @@ export interface TemporaryChannelRepository {
     channelId: string,
     newOwnerId: string,
   ): Promise<TemporaryChannelRecord | undefined>;
+  setOwnerAbsentSince(
+    channelId: string,
+    ownerAbsentSince: Date | null,
+  ): Promise<TemporaryChannelRecord | undefined>;
+  setPanelMessage(
+    channelId: string,
+    panelMessageId: string,
+    panelVersion: number,
+  ): Promise<TemporaryChannelRecord | undefined>;
   remove(channelId: string): Promise<boolean>;
 }
 

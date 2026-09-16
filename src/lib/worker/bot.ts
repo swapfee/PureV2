@@ -2,6 +2,7 @@ import {
   ChannelTypes,
   createBot,
   InteractionResponseTypes,
+  type MessageComponents,
 } from "discordeno";
 
 import type { WorkerConfig } from "../config.ts";
@@ -67,6 +68,12 @@ function withReason<T extends Record<string, unknown>>(
   return reason === undefined ? base : { ...base, reason };
 }
 
+/** Panel/modal payloads are built as plain objects that match Discordeno MessageComponents. */
+function toMessageComponents(components: readonly unknown[]): MessageComponents {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Discordeno expects MessageComponents; panel builders emit compatible JSON shapes.
+  return components as MessageComponents;
+}
+
 function isVoiceChannelType(type: number): boolean {
   const voiceType: number = ChannelTypes.GuildVoice;
   return type === voiceType;
@@ -98,12 +105,18 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
 
   const discord: DiscordApiPort = {
     async respondToInteraction(request: InteractionResponseRequest): Promise<void> {
+      const flags =
+        request.flags ??
+        (request.ephemeral === false ? undefined : 64);
       await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
         type: InteractionResponseTypes.ChannelMessageWithSource,
         data: {
           ...(request.content === undefined ? {} : { content: request.content }),
           ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
-          ...(request.ephemeral === false ? {} : { flags: 64 }),
+          ...(request.components === undefined
+            ? {}
+            : { components: toMessageComponents(request.components) }),
+          ...(flags === undefined ? {} : { flags }),
         },
       });
     },
@@ -115,10 +128,31 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       });
     },
 
+    async deferUpdateInteraction(request) {
+      await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
+        type: InteractionResponseTypes.DeferredUpdateMessage,
+      });
+    },
+
     async editInteractionResponse(request) {
       await bot.helpers.editOriginalInteractionResponse(request.interactionToken, {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
+        ...(request.components === undefined
+          ? {}
+          : { components: toMessageComponents(request.components) }),
+        ...(request.flags === undefined ? {} : { flags: request.flags }),
+      });
+    },
+
+    async showModal(request) {
+      await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
+        type: InteractionResponseTypes.Modal,
+        data: {
+          title: request.title,
+          customId: request.customId,
+          components: toMessageComponents(request.components),
+        },
       });
     },
 
@@ -363,6 +397,60 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         await bot.helpers.sendMessage(String(dm.id), {
           content: request.content,
         });
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async getCurrentUser() {
+      try {
+        const me = await bot.rest.makeRequest<{ id: string | number | bigint; username: string }>(
+          "GET",
+          bot.rest.routes.user("@me"),
+        );
+        return {
+          kind: "found" as const,
+          value: { id: String(me.id), username: me.username },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async sendChannelMessage(request) {
+      try {
+        const created = await bot.rest.makeRequest<{ id: string | number | bigint }>(
+          "POST",
+          bot.rest.routes.channels.messages(request.channelId),
+          {
+            body: {
+              ...(request.content === undefined ? {} : { content: request.content }),
+              ...(request.components === undefined ? {} : { components: request.components }),
+              ...(request.flags === undefined ? {} : { flags: request.flags }),
+            },
+            headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+          },
+        );
+        return { kind: "found" as const, value: { id: String(created.id) } };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async editChannelMessage(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PATCH",
+          bot.rest.routes.channels.message(request.channelId, request.messageId),
+          {
+            body: {
+              ...(request.components === undefined ? {} : { components: request.components }),
+              ...(request.flags === undefined ? {} : { flags: request.flags }),
+            },
+            headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+          },
+        );
         return { kind: "ok" };
       } catch (error) {
         return toDiscordOperationResult(error);

@@ -16,6 +16,11 @@ export interface InteractionCreatePayload {
   readonly memberPermissions?: string;
   readonly commandName?: string;
   readonly options?: readonly InteractionOption[];
+  /** Message component / modal custom id. */
+  readonly customId?: string;
+  /** Modal text inputs or select values. */
+  readonly componentValues?: Readonly<Record<string, string>>;
+  readonly selectedUserIds?: readonly string[];
 }
 
 export interface VoiceStateUpdatePayload {
@@ -52,6 +57,8 @@ export interface InteractionResponseRequest {
   readonly interactionToken: string;
   readonly content?: string;
   readonly embeds?: readonly InteractionEmbed[];
+  readonly components?: readonly unknown[];
+  readonly flags?: number;
   readonly ephemeral?: boolean;
 }
 
@@ -60,6 +67,16 @@ export interface EditInteractionResponseRequest {
   readonly interactionToken: string;
   readonly content?: string;
   readonly embeds?: readonly InteractionEmbed[];
+  readonly components?: readonly unknown[];
+  readonly flags?: number;
+}
+
+export interface ShowModalRequest {
+  readonly interactionId: string;
+  readonly interactionToken: string;
+  readonly title: string;
+  readonly customId: string;
+  readonly components: readonly unknown[];
 }
 
 export interface PermissionOverwrite {
@@ -115,7 +132,12 @@ export interface DiscordApiPort {
     readonly interactionToken: string;
     readonly ephemeral?: boolean;
   }): Promise<void>;
+  deferUpdateInteraction(request: {
+    readonly interactionId: string;
+    readonly interactionToken: string;
+  }): Promise<void>;
   editInteractionResponse(request: EditInteractionResponseRequest): Promise<void>;
+  showModal(request: ShowModalRequest): Promise<void>;
   createVoiceChannel(
     request: CreateVoiceChannelRequest,
   ): Promise<DiscordValueResult<{ readonly id: string }>>;
@@ -156,6 +178,12 @@ export interface DiscordApiPort {
       readonly globalName?: string;
     }>
   >;
+  getCurrentUser(): Promise<
+    DiscordValueResult<{
+      readonly id: string;
+      readonly username: string;
+    }>
+  >;
   getGuildMember(request: {
     readonly guildId: string;
     readonly userId: string;
@@ -183,5 +211,19 @@ export interface DiscordApiPort {
     readonly userId: string;
     readonly content: string;
     readonly requestId: string;
+  }): Promise<DiscordOperationResult>;
+  sendChannelMessage(request: {
+    readonly channelId: string;
+    readonly requestId: string;
+    readonly content?: string;
+    readonly components?: readonly unknown[];
+    readonly flags?: number;
+  }): Promise<DiscordValueResult<{ readonly id: string }>>;
+  editChannelMessage(request: {
+    readonly channelId: string;
+    readonly messageId: string;
+    readonly requestId: string;
+    readonly components?: readonly unknown[];
+    readonly flags?: number;
   }): Promise<DiscordOperationResult>;
 }

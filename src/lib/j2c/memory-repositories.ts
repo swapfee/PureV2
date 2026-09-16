@@ -29,6 +29,7 @@ function cloneTemp(record: TemporaryChannelRecord): TemporaryChannelRecord {
     updatedAt: new Date(record.updatedAt),
     ...(record.emptySince ? { emptySince: new Date(record.emptySince) } : {}),
     ...(record.deletionAttemptedAt ? { deletionAttemptedAt: new Date(record.deletionAttemptedAt) } : {}),
+    ...(record.ownerAbsentSince ? { ownerAbsentSince: new Date(record.ownerAbsentSince) } : {}),
   };
 }
 
@@ -203,6 +204,9 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
         ...(existing.deletionRequestId ? { deletionRequestId: existing.deletionRequestId } : {}),
         ...(existing.lastError ? { lastError: existing.lastError } : {}),
+        ...(existing.ownerAbsentSince ? { ownerAbsentSince: existing.ownerAbsentSince } : {}),
+        ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
+        ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
         ...(emptySince ? { emptySince } : {}),
       };
       byChannel.set(channelId, next);
@@ -300,6 +304,53 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         occupantIds: [...existing.occupantIds],
         rejectedUserIds: [...existing.rejectedUserIds],
         ownerId: newOwnerId,
+        updatedAt: new Date(),
+      };
+      // Clear absence on transfer; preserve panel fields via spread.
+      const { ownerAbsentSince: _absent, ...rest } = next;
+      void _absent;
+      const cleared: TemporaryChannelRecord = { ...rest, updatedAt: new Date() };
+      byChannel.set(channelId, cleared);
+      return cloneTemp(cleared);
+    },
+
+    async setOwnerAbsentSince(channelId, ownerAbsentSince) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      const next: TemporaryChannelRecord = {
+        guildId: existing.guildId,
+        channelId: existing.channelId,
+        ownerId: existing.ownerId,
+        lobbyChannelId: existing.lobbyChannelId,
+        status: existing.status,
+        reservationId: existing.reservationId,
+        creationRequestId: existing.creationRequestId,
+        occupantIds: [...existing.occupantIds],
+        locked: existing.locked,
+        rejectedUserIds: [...existing.rejectedUserIds],
+        createdAt: existing.createdAt,
+        updatedAt: new Date(),
+        ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
+        ...(existing.deletionRequestId ? { deletionRequestId: existing.deletionRequestId } : {}),
+        ...(existing.lastError ? { lastError: existing.lastError } : {}),
+        ...(existing.emptySince ? { emptySince: existing.emptySince } : {}),
+        ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
+        ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
+        ...(ownerAbsentSince ? { ownerAbsentSince } : {}),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async setPanelMessage(channelId, panelMessageId, panelVersion) {
+      const existing = byChannel.get(channelId);
+      if (!existing) return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: [...existing.rejectedUserIds],
+        panelMessageId,
+        panelVersion,
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);

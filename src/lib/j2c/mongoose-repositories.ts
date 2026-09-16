@@ -52,6 +52,9 @@ function toTempRecord(doc: {
   occupantIds: string[];
   locked?: boolean | null;
   rejectedUserIds?: string[] | null;
+  ownerAbsentSince?: Date | null;
+  panelMessageId?: string | null;
+  panelVersion?: number | null;
   emptySince?: Date | null;
   deletionAttemptedAt?: Date | null;
   deletionRequestId?: string | null;
@@ -73,6 +76,9 @@ function toTempRecord(doc: {
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     ...(doc.emptySince ? { emptySince: doc.emptySince } : {}),
+    ...(doc.ownerAbsentSince ? { ownerAbsentSince: doc.ownerAbsentSince } : {}),
+    ...(doc.panelMessageId ? { panelMessageId: doc.panelMessageId } : {}),
+    ...(typeof doc.panelVersion === "number" ? { panelVersion: doc.panelVersion } : {}),
     ...(doc.deletionAttemptedAt ? { deletionAttemptedAt: doc.deletionAttemptedAt } : {}),
     ...(doc.deletionRequestId ? { deletionRequestId: doc.deletionRequestId } : {}),
     ...(doc.lastError ? { lastError: doc.lastError } : {}),
@@ -319,7 +325,31 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       if (conflict) return undefined;
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
-        { $set: { ownerId: newOwnerId } },
+        { $set: { ownerId: newOwnerId }, $unset: { ownerAbsentSince: 1 } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async setOwnerAbsentSince(channelId, ownerAbsentSince) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        ownerAbsentSince
+          ? { $set: { ownerAbsentSince } }
+          : { $unset: { ownerAbsentSince: 1 } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async setPanelMessage(channelId, panelMessageId, panelVersion) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId },
+        { $set: { panelMessageId, panelVersion } },
         { new: true },
       )
         .lean()

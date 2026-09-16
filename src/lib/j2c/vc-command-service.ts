@@ -18,6 +18,7 @@ import {
   setEveryoneConnectDenied,
   setEveryoneViewDenied,
 } from "./voice-controls.ts";
+import { refreshVoiceControlPanel } from "./voice-panel-service.ts";
 
 export const VC_COOLDOWNS_MS = {
   invite: 3_000,
@@ -55,6 +56,26 @@ function normalizeChannelName(raw: string): string | undefined {
   return trimmed;
 }
 
+function isVcSubcommand(value: string): value is VcSubcommand {
+  switch (value) {
+    case "invite":
+    case "rename":
+    case "limit":
+    case "lock":
+    case "unlock":
+    case "hide":
+    case "unhide":
+    case "permit":
+    case "reject":
+    case "transfer":
+    case "info":
+    case "delete":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function getSubcommand(interaction: InteractionCreatePayload): {
   readonly name: VcSubcommand | undefined;
   readonly options: readonly { name: string; value?: string | number | boolean }[];
@@ -63,26 +84,11 @@ function getSubcommand(interaction: InteractionCreatePayload): {
   if (!root || typeof root.value === "boolean") {
     return { name: undefined, options: [] };
   }
-  const name = root.name;
-  const allowed: readonly VcSubcommand[] = [
-    "invite",
-    "rename",
-    "limit",
-    "lock",
-    "unlock",
-    "hide",
-    "unhide",
-    "permit",
-    "reject",
-    "transfer",
-    "info",
-    "delete",
-  ];
-  if (!allowed.includes(name as VcSubcommand)) {
+  if (!isVcSubcommand(root.name)) {
     return { name: undefined, options: [] };
   }
   return {
-    name: name as VcSubcommand,
+    name: root.name,
     options: (root.options ?? []).map((option) => ({
       name: option.name,
       ...(option.value === undefined ? {} : { value: option.value }),
@@ -107,6 +113,7 @@ export function createVcCommandService(options: {
   readonly logger: Logger;
   readonly metrics: VcMetrics;
   readonly cooldowns: CooldownStore;
+  readonly botUsername?: string;
   readonly completedInteractions?: Set<string>;
 }): VcCommandService {
   const completed = options.completedInteractions ?? new Set<string>();
@@ -655,6 +662,25 @@ export function createVcCommandService(options: {
               ),
             );
             return;
+          }
+          if (options.botUsername) {
+            try {
+              await refreshVoiceControlPanel({
+                discord: options.discord,
+                channels: options.channels,
+                logger: options.logger,
+                channelId: auth.channel.channelId,
+                ownerId: targetUserId,
+                botUsername: options.botUsername,
+                ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
+                requestId: `${requestId}:panel`,
+              });
+            } catch (error) {
+              options.logger.warn("VC transfer panel refresh failed", {
+                ...baseLog,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
           }
           await succeed("Transfer Complete", `Ownership transferred to <@${targetUserId}>.`);
           return;

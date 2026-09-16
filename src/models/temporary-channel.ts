@@ -45,6 +45,9 @@ const temporaryChannelSchema = new Schema(
         message: "rejectedUserIds must contain Discord snowflakes",
       },
     },
+    ownerAbsentSince: { type: Date, required: false },
+    panelMessageId: { type: String, required: false, trim: true, match: SNOWFLAKE_PATTERN },
+    panelVersion: { type: Number, required: false, min: 1 },
     emptySince: { type: Date, required: false },
     deletionAttemptedAt: { type: Date, required: false },
     deletionRequestId: { type: String, required: false, trim: true, maxlength: 80 },
@@ -94,6 +97,9 @@ export interface TemporaryChannelRecord {
   readonly occupantIds: readonly string[];
   readonly locked: boolean;
   readonly rejectedUserIds: readonly string[];
+  readonly ownerAbsentSince?: Date;
+  readonly panelMessageId?: string;
+  readonly panelVersion?: number;
   readonly emptySince?: Date;
   readonly deletionAttemptedAt?: Date;
   readonly deletionRequestId?: string;

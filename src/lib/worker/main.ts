@@ -20,6 +20,7 @@ import {
 import { createJ2cRuntime } from "../j2c/runtime.ts";
 import { createVcCommandService } from "../j2c/vc-command-service.ts";
 import { createSetupCommandService } from "../j2c/setup-command-service.ts";
+import { createVoicePanelInteractionHandler } from "../j2c/voice-panel-interactions.ts";
 import { createVcMetrics } from "../j2c/vc-metrics.ts";
 import type { GatewayEventMessage, IpcMessage } from "../ipc/messages.ts";
 import { parseIpcMessage } from "../ipc/messages.ts";
@@ -82,12 +83,16 @@ export async function runWorkerMain(): Promise<void> {
   j2c.markModelsInitialized();
   j2c.markIndexesVerified(true);
 
+  const botUser = await discord.getCurrentUser();
+  const botUsername = botUser.kind === "found" ? botUser.value.username : "Bot";
+
   const vc = createVcCommandService({
     channels: channelsRepo,
     discord,
     logger: logger.child({ component: "vc" }),
     metrics: createVcMetrics(),
     cooldowns: createCooldownStore({ maxEntries: 5_000 }),
+    botUsername,
   });
 
   const setup = createSetupCommandService({
@@ -99,13 +104,20 @@ export async function runWorkerMain(): Promise<void> {
     logger: logger.child({ component: "setup" }),
   });
 
+  const voicePanel = createVoicePanelInteractionHandler({
+    channels: channelsRepo,
+    discord,
+    logger: logger.child({ component: "voice-panel" }),
+    botUsername,
+  });
+
   const dispatcher = createInteractionDispatcher(
     commands,
     cooldowns,
     config.BOT_WORKER_ID,
     logger,
     discord,
-    { vc, setup },
+    { vc, setup, voicePanel },
   );
 
   const context: EventContext = {

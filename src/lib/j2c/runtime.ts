@@ -89,6 +89,7 @@ export function createJ2cRuntime(options: {
     deletion,
     occupancy,
     logger: options.logger,
+    discord: options.discord,
   });
   const reconciler = createReconciler({
     channels: options.channels,
