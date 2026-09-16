@@ -42,6 +42,11 @@ export interface J2cEventServices {
     markReady(): void;
     isReady(): boolean;
   };
+  /**
+   * After GUILD_CREATE seeds voice states, schedule empty-temp-channel deletion
+   * without waiting for a subsequent leave event.
+   */
+  scheduleEmptyChannelDeletions(guildId: string): Promise<void>;
 }
 
 export interface EventContext {

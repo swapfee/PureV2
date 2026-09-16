@@ -267,6 +267,13 @@ export function wireBotEvents(
     }
     context.j2c.occupancy.seedGuildVoiceStates(guildId, seeded);
     context.j2c.occupancy.markReady();
+    // Restart: empty temp channels get no leave event — schedule deletion from the seed.
+    void context.j2c.scheduleEmptyChannelDeletions(guildId).catch((error: unknown) => {
+      context.logger.error("Failed to schedule empty-channel deletions after guild seed", {
+        guildId,
+        error,
+      });
+    });
   };
 }
 

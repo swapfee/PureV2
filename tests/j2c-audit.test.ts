@@ -166,6 +166,7 @@ describe("owner uniqueness while deleting", () => {
 describe("voice occupancy tracker", () => {
   test("tracks two users and ignores stale leave after newer join", () => {
     const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, []);
     occupancy.markReady();
     occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });
     occupancy.apply({ guildId, userId: otherId, channelId, sequence: 2 });
@@ -223,6 +224,12 @@ describe("voice occupancy tracker", () => {
     expect((await channels.findByChannelId(channelId))?.status).toBe("stale");
   });
 
+  test("unseeded guild stays unknown even when tracker is ready", () => {
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.markReady();
+    expect(occupancy.getOccupants(guildId, channelId).kind).toBe("unknown");
+  });
+
   test("one leave while one remains does not delete", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     const metrics = createJ2cMetrics();
@@ -241,9 +248,11 @@ describe("voice occupancy tracker", () => {
     });
 
     const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [
+      { userId: ownerId, channelId },
+      { userId: otherId, channelId },
+    ]);
     occupancy.markReady();
-    occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });
-    occupancy.apply({ guildId, userId: otherId, channelId, sequence: 2 });
 
     const deletion = createDeletionLifecycle({
       channels,
@@ -280,6 +289,7 @@ describe("voice occupancy tracker", () => {
 
   test("duplicate voice events are ignored", () => {
     const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [{ userId: ownerId, channelId }]);
     occupancy.markReady();
     occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });
     occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });

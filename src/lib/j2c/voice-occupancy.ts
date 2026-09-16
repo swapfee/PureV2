@@ -80,6 +80,8 @@ export function createVoiceOccupancyTracker(): VoiceOccupancyTracker {
 
     getOccupants(guildId, channelId) {
       if (!ready) return { kind: "unknown" };
+      // Until GUILD_CREATE seeds this guild, emptiness is unknown — never invent [].
+      if (!seededGuilds.has(guildId)) return { kind: "unknown" };
       const userIds: string[] = [];
       for (const [key, value] of byUser) {
         if (!key.startsWith(`${guildId}:`)) continue;
@@ -92,6 +94,7 @@ export function createVoiceOccupancyTracker(): VoiceOccupancyTracker {
 
     getUserChannel(guildId, userId) {
       if (!ready) return { kind: "unknown" };
+      if (!seededGuilds.has(guildId)) return { kind: "unknown" };
       const existing = byUser.get(userKey(guildId, userId));
       if (!existing) return { kind: "known", userIds: [], channelId: null };
       return { kind: "known", userIds: existing.channelId ? [userId] : [], channelId: existing.channelId };

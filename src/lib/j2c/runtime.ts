@@ -37,6 +37,11 @@ export interface J2cRuntime {
   markFatal(detail: string): void;
   reconcileDatabaseRest(): Promise<ReconciliationResult>;
   reconcileOccupancy(): Promise<ReconciliationResult>;
+  /**
+   * After a guild's voice states are seeded, schedule deletion for temp channels
+   * that are empty in the occupancy cache (covers worker restart without a leave event).
+   */
+  scheduleEmptyChannelDeletions(guildId: string): Promise<void>;
   /** Runs database/REST reconcile only; occupancy must be completed separately after warm-up. */
   reconcile(): Promise<ReconciliationResult>;
   snapshotMetrics(): J2cMetricsSnapshot;
@@ -98,11 +103,22 @@ export function createJ2cRuntime(options: {
     metrics,
     logger: options.logger,
     occupancy,
+    deletion,
     ...(options.clock ? { clock: options.clock } : {}),
     ...(options.reconcileConcurrency === undefined
       ? {}
       : { concurrency: options.reconcileConcurrency }),
   });
+
+  const scheduleEmptyChannelDeletions = async (guildId: string): Promise<void> => {
+    if (!occupancy.isReady()) return;
+    const active = await options.channels.listActiveByGuild(guildId);
+    for (const record of active) {
+      const occupants = occupancy.getOccupants(record.guildId, record.channelId);
+      if (occupants.kind !== "known") continue;
+      await deletion.onOccupantsChanged(record.channelId, occupants.userIds);
+    }
+  };
 
   let modelsInitialized = false;
   let indexesVerified = false;
@@ -181,6 +197,7 @@ export function createJ2cRuntime(options: {
         throw error;
       }
     },
+    scheduleEmptyChannelDeletions,
     async reconcile() {
       return this.reconcileDatabaseRest();
     },

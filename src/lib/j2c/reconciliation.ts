@@ -1,5 +1,6 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort } from "../runtime-types.ts";
+import type { DeletionLifecycle } from "./deletion-lifecycle.ts";
 import type { J2cMetrics } from "./metrics.ts";
 import type { CreationReservationRepository, TemporaryChannelRepository } from "./repositories.ts";
 import type { Clock } from "./time.ts";
@@ -59,6 +60,7 @@ export function createReconciler(options: {
   readonly metrics: J2cMetrics;
   readonly logger: Logger;
   readonly occupancy?: VoiceOccupancyTracker;
+  readonly deletion?: DeletionLifecycle;
   readonly clock?: Clock;
   readonly concurrency?: number;
   readonly stuckAfterMs?: number;
@@ -214,6 +216,12 @@ export function createReconciler(options: {
           guildId: record.guildId,
         });
         options.metrics.increment("reconciliationFindings");
+        // Startup must schedule the same empty-channel timer as live voice leaves.
+        if (options.deletion) {
+          await options.deletion.onOccupantsChanged(record.channelId, []);
+        }
+      } else if (options.deletion) {
+        await options.deletion.onOccupantsChanged(record.channelId, occupants.userIds);
       }
     }
 

@@ -443,6 +443,7 @@ describe("owner absence tracking", () => {
     const metrics = createJ2cMetrics();
     const { discord } = createFakeDiscord({ currentUser: { id: botId, username: "Pure" } });
     const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [{ userId: ownerId, channelId }]);
     occupancy.markReady();
     const deletion = createDeletionLifecycle({
       channels,
@@ -738,6 +739,7 @@ describe("voice panel repair throttle", () => {
       failNextSendMessage: { kind: "transient", message: "fail" },
     });
     const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [{ userId: ownerId, channelId }]);
     occupancy.markReady();
     occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });
 

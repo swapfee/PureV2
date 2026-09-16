@@ -104,6 +104,10 @@ function observeGatewayVoiceState(
       seeded.push({ userId, channelId });
     }
     runtime.occupancy.seedGuildVoiceStates(guildId, seeded);
+    // Late GUILD_CREATE after initial occupancy reconcile still needs empty-channel sweep.
+    if (runtime.occupancy.isReady()) {
+      void runtime.scheduleEmptyChannelDeletions(guildId);
+    }
   }
 }
 

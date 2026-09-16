@@ -12,12 +12,14 @@ import {
 import { createReconciler } from "../src/lib/j2c/reconciliation.ts";
 import { createReservationService } from "../src/lib/j2c/reservation-service.ts";
 import { creationRequestId } from "../src/lib/j2c/request-ids.ts";
+import { createJ2cRuntime } from "../src/lib/j2c/runtime.ts";
 import { createManualTimerScheduler } from "../src/lib/j2c/time.ts";
 import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
 import { createLogger } from "../src/lib/logger.ts";
 
-function readyOccupancy() {
+function readyOccupancy(seedGuildId = guildId) {
   const occupancy = createVoiceOccupancyTracker();
+  occupancy.seedGuildVoiceStates(seedGuildId, []);
   occupancy.markReady();
   return occupancy;
 }
@@ -506,5 +508,234 @@ describe("startup reconciliation", () => {
     });
     const result = await reconciler.run();
     expect(result.findings.some((finding) => finding.kind === "expired_reservation")).toBe(true);
+  });
+
+  test("occupancy reconcile schedules deletion for empty temp channels", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const { discord, controls } = createFakeDiscord();
+    const channelId = "141414141414141414";
+    controls.channels.set(channelId, { id: channelId, name: "empty-temp", guildId, permissionOverwrites: [] });
+
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-empty-restart",
+      creationRequestId: "req-empty-restart",
+      occupantIds: [memberId],
+    });
+
+    const occupancy = createVoiceOccupancyTracker();
+    // Guild seed with no occupants — channel is empty after restart.
+    occupancy.seedGuildVoiceStates(guildId, []);
+    occupancy.markReady();
+
+    const deletion = createDeletionLifecycle({
+      channels,
+      discord,
+      metrics,
+      logger: testLogger(),
+      timers,
+      occupancy,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    const reconciler = createReconciler({
+      channels,
+      reservations,
+      discord,
+      metrics,
+      logger: testLogger(),
+      occupancy,
+      deletion,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    const result = await reconciler.runOccupancyDependent();
+    expect(result.findings.some((finding) => finding.kind === "occupancy_empty_candidate")).toBe(true);
+    expect(timers.pendingCount()).toBe(1);
+
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+    expect(controls.deleteCalls).toHaveLength(1);
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
+  });
+
+  test("unseeded guild does not invent empty occupancy during reconcile", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const { discord, controls } = createFakeDiscord();
+    const channelId = "151515151515151515";
+    controls.channels.set(channelId, { id: channelId, name: "temp", guildId, permissionOverwrites: [] });
+
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-unseeded",
+      creationRequestId: "req-unseeded",
+      occupantIds: [memberId],
+    });
+
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.markReady(); // ready but guild never seeded
+
+    const deletion = createDeletionLifecycle({
+      channels,
+      discord,
+      metrics,
+      logger: testLogger(),
+      timers,
+      occupancy,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    const reconciler = createReconciler({
+      channels,
+      reservations,
+      discord,
+      metrics,
+      logger: testLogger(),
+      occupancy,
+      deletion,
+    });
+
+    const result = await reconciler.runOccupancyDependent();
+    expect(result.findings.some((finding) => finding.kind === "occupancy_not_ready")).toBe(true);
+    expect(timers.pendingCount()).toBe(0);
+    expect(controls.deleteCalls).toHaveLength(0);
+    expect((await channels.findByChannelId(channelId))?.status).toBe("active");
+  });
+});
+
+describe("scheduleEmptyChannelDeletions after guild seed", () => {
+  test("deletes empty active channels without a leave event", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const configs = createMemoryGuildConfigRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const { discord, controls } = createFakeDiscord();
+    const channelId = "161616161616161616";
+    controls.channels.set(channelId, { id: channelId, name: "empty-temp", guildId, permissionOverwrites: [] });
+
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-seed-sweep",
+      creationRequestId: "req-seed-sweep",
+      occupantIds: [memberId],
+    });
+
+    const occupancy = createVoiceOccupancyTracker();
+    const runtime = createJ2cRuntime({
+      configs,
+      channels,
+      reservations,
+      discord,
+      logger: testLogger(),
+      metrics,
+      occupancy,
+      timers,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    occupancy.seedGuildVoiceStates(guildId, []);
+    runtime.markOccupancyReady(true);
+
+    await runtime.scheduleEmptyChannelDeletions(guildId);
+    expect(timers.pendingCount()).toBe(1);
+
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+    expect(controls.deleteCalls).toHaveLength(1);
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
+  });
+
+  test("skips occupied channels and unseeded guilds", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const configs = createMemoryGuildConfigRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const { discord, controls } = createFakeDiscord();
+    const emptyId = "171717171717171717";
+    const occupiedId = "181818181818181818";
+    const otherGuild = "191919191919191919";
+    controls.channels.set(emptyId, { id: emptyId, name: "empty", guildId, permissionOverwrites: [] });
+    controls.channels.set(occupiedId, { id: occupiedId, name: "busy", guildId, permissionOverwrites: [] });
+    controls.channels.set(emptyId + "x", {
+      id: emptyId + "x",
+      name: "other",
+      guildId: otherGuild,
+      permissionOverwrites: [],
+    });
+
+    await channels.create({
+      guildId,
+      channelId: emptyId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-empty",
+      creationRequestId: "req-empty",
+      occupantIds: [],
+    });
+    await channels.create({
+      guildId,
+      channelId: occupiedId,
+      ownerId: "888888888888888888",
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-busy",
+      creationRequestId: "req-busy",
+      occupantIds: [memberId],
+    });
+    await channels.create({
+      guildId: otherGuild,
+      channelId: emptyId + "x",
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-other",
+      creationRequestId: "req-other",
+      occupantIds: [],
+    });
+
+    const occupancy = createVoiceOccupancyTracker();
+    const runtime = createJ2cRuntime({
+      configs,
+      channels,
+      reservations,
+      discord,
+      logger: testLogger(),
+      metrics,
+      occupancy,
+      timers,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    occupancy.seedGuildVoiceStates(guildId, [{ userId: memberId, channelId: occupiedId }]);
+    runtime.markOccupancyReady(true);
+
+    await runtime.scheduleEmptyChannelDeletions(guildId);
+    expect(timers.pendingCount()).toBe(1);
+
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+    expect(controls.deleteCalls).toHaveLength(1);
+    expect(controls.deleteCalls[0]?.channelId).toBe(emptyId);
+    expect(await channels.findByChannelId(emptyId)).toBeUndefined();
+    expect((await channels.findByChannelId(occupiedId))?.status).toBe("active");
+    expect((await channels.findByChannelId(emptyId + "x"))?.status).toBe("active");
   });
 });
