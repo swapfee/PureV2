@@ -74,6 +74,7 @@ export interface FakeDiscordControls {
   failNextEdit?: DiscordOperationResult;
   failNextOverwrite?: DiscordOperationResult;
   failNextSendMessage?: DiscordValueResult<{ id: string }>;
+  failNextEditMessage?: DiscordOperationResult;
   failCompensationDeletes?: boolean;
   missingChannels: Set<string>;
   createSequence: number;
@@ -115,6 +116,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     ...(seed?.failNextEdit === undefined ? {} : { failNextEdit: seed.failNextEdit }),
     ...(seed?.failNextOverwrite === undefined ? {} : { failNextOverwrite: seed.failNextOverwrite }),
     ...(seed?.failNextSendMessage === undefined ? {} : { failNextSendMessage: seed.failNextSendMessage }),
+    ...(seed?.failNextEditMessage === undefined ? {} : { failNextEditMessage: seed.failNextEditMessage }),
     ...(seed?.failCompensationDeletes === undefined
       ? {}
       : { failCompensationDeletes: seed.failCompensationDeletes }),
@@ -357,6 +359,11 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         ...(request.components === undefined ? {} : { components: request.components }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
       });
+      if (controls.failNextEditMessage) {
+        const result = controls.failNextEditMessage;
+        delete controls.failNextEditMessage;
+        return result;
+      }
       return { kind: "ok" };
     },
   };

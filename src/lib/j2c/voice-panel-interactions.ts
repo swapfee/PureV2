@@ -1,3 +1,5 @@
+import { ChannelTypes } from "discordeno";
+
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import { ACTION_EMOJIS, failureResponse, successResponse } from "./action-response.ts";
@@ -37,6 +39,11 @@ const OWNER_ACTIONS = new Set<VoicePanelAction>([
   "delete",
 ]);
 
+interface InteractionReplyState {
+  deferred: boolean;
+  answered: boolean;
+}
+
 function normalizeChannelName(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
   if (trimmed.length < 1 || trimmed.length > 100) return undefined;
@@ -46,15 +53,16 @@ function normalizeChannelName(raw: string): string | undefined {
 async function replyEphemeral(
   discord: DiscordApiPort,
   interaction: InteractionCreatePayload,
-  deferred: boolean,
+  replyState: InteractionReplyState,
   message: ReturnType<typeof successResponse>,
 ): Promise<void> {
-  if (deferred) {
+  if (replyState.deferred) {
     await discord.editInteractionResponse({
       applicationId: interaction.applicationId,
       interactionToken: interaction.token,
       embeds: message.embeds,
     });
+    replyState.answered = true;
     return;
   }
   await discord.respondToInteraction({
@@ -63,6 +71,32 @@ async function replyEphemeral(
     embeds: message.embeds,
     ephemeral: true,
   });
+  replyState.answered = true;
+}
+
+async function deferEphemeral(
+  discord: DiscordApiPort,
+  interaction: InteractionCreatePayload,
+  replyState: InteractionReplyState,
+): Promise<void> {
+  await discord.deferInteraction({
+    interactionId: interaction.id,
+    interactionToken: interaction.token,
+    ephemeral: true,
+  });
+  replyState.deferred = true;
+}
+
+async function deferUpdate(
+  discord: DiscordApiPort,
+  interaction: InteractionCreatePayload,
+  replyState: InteractionReplyState,
+): Promise<void> {
+  await discord.deferUpdateInteraction({
+    interactionId: interaction.id,
+    interactionToken: interaction.token,
+  });
+  replyState.deferred = true;
 }
 
 async function requireManagedConnected(options: {
@@ -80,6 +114,11 @@ async function requireManagedConnected(options: {
   }
   if (interaction.channelId !== channelId) {
     return { ok: false, reason: "Use this control inside the managed voice channel." };
+  }
+
+  const channel = await options.discord.getChannel({ channelId });
+  if (channel.kind !== "found" || channel.value.type !== ChannelTypes.GuildVoice) {
+    return { ok: false, reason: "You must be connected to a managed voice channel." };
   }
 
   const voice = await options.discord.getUserVoiceChannel({
@@ -124,22 +163,39 @@ export function createVoicePanelInteractionHandler(options: {
       const customId = interaction.customId;
       if (!customId) return;
       const parts = parseColonId(customId);
+      const replyState: InteractionReplyState = { deferred: false, answered: false };
 
       try {
         if (parts[0] === VOICE_PANEL_PREFIX) {
-          await handlePanelButton({ interaction, parts, channels, discord, logger, botUsername });
+          await handlePanelButton({
+            interaction,
+            parts,
+            channels,
+            discord,
+            logger,
+            botUsername,
+            replyState,
+          });
           return;
         }
         if (parts[0] === VOICE_MODAL_PREFIX) {
-          await handleModalSubmit({ interaction, parts, channels, discord, logger });
+          await handleModalSubmit({ interaction, parts, channels, discord, logger, replyState });
           return;
         }
         if (parts[0] === VOICE_SELECT_PREFIX) {
-          await handleTransferSelect({ interaction, parts, channels, discord, logger, botUsername });
+          await handleTransferSelect({
+            interaction,
+            parts,
+            channels,
+            discord,
+            logger,
+            botUsername,
+            replyState,
+          });
           return;
         }
         if (parts[0] === VOICE_DELETE_PREFIX) {
-          await handleDeleteConfirm({ interaction, parts, channels, discord, logger });
+          await handleDeleteConfirm({ interaction, parts, channels, discord, logger, replyState });
         }
       } catch (error) {
         logger.error("Voice panel interaction failed", {
@@ -147,11 +203,12 @@ export function createVoicePanelInteractionHandler(options: {
           userId: interaction.userId,
           error: error instanceof Error ? error.message : String(error),
         });
+        if (replyState.answered) return;
         try {
           await replyEphemeral(
             discord,
             interaction,
-            true,
+            replyState,
             failureResponse("Action Failed", "Something went wrong. Try again shortly."),
           );
         } catch {
@@ -169,6 +226,7 @@ async function handlePanelButton(input: {
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
+  readonly replyState: InteractionReplyState;
 }): Promise<void> {
   const [, actionRaw, channelId, embeddedOwnerId, extra] = input.parts;
   if (!actionRaw || !channelId || !embeddedOwnerId || extra || !isVoicePanelAction(actionRaw)) {
@@ -185,18 +243,18 @@ async function handlePanelButton(input: {
     });
     if (!access.ok) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        false,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", access.reason),
       );
       return;
     }
     if (access.record.ownerId !== input.interaction.userId) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        false,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", "You must own this voice channel to use its controls."),
       );
       return;
@@ -209,14 +267,11 @@ async function handlePanelButton(input: {
       customId: modal.customId,
       components: modal.components,
     });
+    input.replyState.answered = true;
     return;
   }
 
-  await input.discord.deferInteraction({
-    interactionId: input.interaction.id,
-    interactionToken: input.interaction.token,
-    ephemeral: true,
-  });
+  await deferEphemeral(input.discord, input.interaction, input.replyState);
 
   const access = await requireManagedConnected({
     interaction: input.interaction,
@@ -228,7 +283,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       failureResponse("Action Failed", access.reason),
     );
     return;
@@ -238,7 +293,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       failureResponse("Action Failed", "You must own this voice channel to use its controls."),
     );
     return;
@@ -248,9 +303,9 @@ async function handlePanelButton(input: {
     const channel = await input.discord.getChannel({ channelId });
     if (channel.kind !== "found") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Info Failed", "Could not load channel details."),
       );
       return;
@@ -260,7 +315,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       {
         embeds: [
           {
@@ -283,9 +338,9 @@ async function handlePanelButton(input: {
     const channel = await input.discord.getChannel({ channelId });
     if (channel.kind !== "found") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", "Could not load channel permissions."),
       );
       return;
@@ -300,9 +355,9 @@ async function handlePanelButton(input: {
     });
     if (result.kind !== "ok") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", `Could not ${action} the channel.`),
       );
       return;
@@ -311,7 +366,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       successResponse(action === "lock" ? "Channel locked." : "Channel unlocked."),
     );
     return;
@@ -321,9 +376,9 @@ async function handlePanelButton(input: {
     const channel = await input.discord.getChannel({ channelId });
     if (channel.kind !== "found") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", "Could not load channel permissions."),
       );
       return;
@@ -338,9 +393,9 @@ async function handlePanelButton(input: {
     });
     if (result.kind !== "ok") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Action Failed", `Could not ${action} the channel.`),
       );
       return;
@@ -348,7 +403,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       successResponse(action === "hide" ? "Channel hidden." : "Channel visible again."),
     );
     return;
@@ -360,9 +415,9 @@ async function handlePanelButton(input: {
     );
     if (connectedOthers.length === 0) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Transfer Failed", "No other members are connected to transfer to."),
       );
       return;
@@ -373,15 +428,16 @@ async function handlePanelButton(input: {
       content: "Select the member who should become the new owner.",
       components: [...buildTransferSelect(channelId)],
     });
+    input.replyState.answered = true;
     return;
   }
 
   if (action === "claim") {
     if (access.record.ownerId === input.interaction.userId) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Claim Failed", "You already own this channel."),
       );
       return;
@@ -392,9 +448,9 @@ async function handlePanelButton(input: {
     });
     if (ownerVoice.kind === "found" && ownerVoice.value.channelId === channelId) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Claim Failed", "The owner is still connected to this channel."),
       );
       return;
@@ -402,9 +458,9 @@ async function handlePanelButton(input: {
     const absentSince = access.record.ownerAbsentSince?.getTime();
     if (absentSince === undefined) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Claim Failed", "Ownership is not available to claim yet."),
       );
       return;
@@ -413,9 +469,9 @@ async function handlePanelButton(input: {
     if (remaining > 0) {
       const minutes = Math.max(1, Math.ceil(remaining / 60_000));
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse(
           "Claim Failed",
           `You can claim ownership in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
@@ -426,9 +482,9 @@ async function handlePanelButton(input: {
     const transferred = await input.channels.transferOwner(channelId, input.interaction.userId);
     if (!transferred) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Claim Failed", "Could not claim ownership."),
       );
       return;
@@ -446,7 +502,7 @@ async function handlePanelButton(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       successResponse("Claim Complete", "You are now the channel owner."),
     );
     return;
@@ -463,6 +519,7 @@ async function handlePanelButton(input: {
       ],
       components: [...buildDeleteConfirmation(channelId)],
     });
+    input.replyState.answered = true;
   }
 }
 
@@ -472,15 +529,12 @@ async function handleModalSubmit(input: {
   readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
+  readonly replyState: InteractionReplyState;
 }): Promise<void> {
   const [, action, channelId, extra] = input.parts;
   if (!action || !channelId || extra) return;
 
-  await input.discord.deferInteraction({
-    interactionId: input.interaction.id,
-    interactionToken: input.interaction.token,
-    ephemeral: true,
-  });
+  await deferEphemeral(input.discord, input.interaction, input.replyState);
 
   const access = await requireManagedConnected({
     interaction: input.interaction,
@@ -492,7 +546,7 @@ async function handleModalSubmit(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       failureResponse("Action Failed", access.reason),
     );
     return;
@@ -501,7 +555,7 @@ async function handleModalSubmit(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       failureResponse("Action Failed", "You must own this voice channel to use its controls."),
     );
     return;
@@ -512,9 +566,9 @@ async function handleModalSubmit(input: {
     const name = normalizeChannelName(raw);
     if (!name) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Rename Failed", "Name must be 1–100 characters."),
       );
       return;
@@ -522,9 +576,9 @@ async function handleModalSubmit(input: {
     const channel = await input.discord.getChannel({ channelId });
     if (channel.kind === "found" && channel.value.name === name) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Rename Failed", "That is already the channel name."),
       );
       return;
@@ -537,9 +591,9 @@ async function handleModalSubmit(input: {
     });
     if (result.kind !== "ok") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Rename Failed", "Could not rename the channel."),
       );
       return;
@@ -547,7 +601,7 @@ async function handleModalSubmit(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       successResponse("Rename Complete", `Channel renamed to \`${name}\`.`),
     );
     return;
@@ -556,9 +610,9 @@ async function handleModalSubmit(input: {
   if (action === "limit") {
     if (!/^\d{1,2}$/.test(raw.trim())) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Limit Failed", "Limit must be an integer from 0 to 99."),
       );
       return;
@@ -566,9 +620,9 @@ async function handleModalSubmit(input: {
     const amount = Number(raw.trim());
     if (!Number.isInteger(amount) || amount < 0 || amount > 99) {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Limit Failed", "Limit must be an integer from 0 to 99."),
       );
       return;
@@ -581,9 +635,9 @@ async function handleModalSubmit(input: {
     });
     if (result.kind !== "ok") {
       await replyEphemeral(
-        input.discord,
-        input.interaction,
-        true,
+      input.discord,
+      input.interaction,
+      input.replyState,
         failureResponse("Limit Failed", "Could not update the user limit."),
       );
       return;
@@ -591,7 +645,7 @@ async function handleModalSubmit(input: {
     await replyEphemeral(
       input.discord,
       input.interaction,
-      true,
+      input.replyState,
       successResponse(
         "Limit Complete",
         amount === 0 ? "User limit removed." : `User limit set to ${amount}.`,
@@ -607,14 +661,12 @@ async function handleTransferSelect(input: {
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
+  readonly replyState: InteractionReplyState;
 }): Promise<void> {
   const [, action, channelId, extra] = input.parts;
   if (action !== "transfer" || !channelId || extra) return;
 
-  await input.discord.deferUpdateInteraction({
-    interactionId: input.interaction.id,
-    interactionToken: input.interaction.token,
-  });
+  await deferUpdate(input.discord, input.interaction, input.replyState);
 
   const access = await requireManagedConnected({
     interaction: input.interaction,
@@ -723,25 +775,12 @@ async function handleDeleteConfirm(input: {
   readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
+  readonly replyState: InteractionReplyState;
 }): Promise<void> {
   const [, choice, channelId, extra] = input.parts;
   if (!choice || !channelId || extra) return;
 
-  await input.discord.deferUpdateInteraction({
-    interactionId: input.interaction.id,
-    interactionToken: input.interaction.token,
-  });
-
-  if (choice === "cancel") {
-    await input.discord.editInteractionResponse({
-      applicationId: input.interaction.applicationId,
-      interactionToken: input.interaction.token,
-      content: "Deletion cancelled.",
-      embeds: [],
-      components: [],
-    });
-    return;
-  }
+  await deferUpdate(input.discord, input.interaction, input.replyState);
 
   const access = await requireManagedConnected({
     interaction: input.interaction,
@@ -754,11 +793,24 @@ async function handleDeleteConfirm(input: {
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
       embeds: failureResponse(
-        "Delete Failed",
+        choice === "cancel" ? "Cancel Failed" : "Delete Failed",
         access.ok ? "You must own this voice channel to use its controls." : access.reason,
       ).embeds,
       components: [],
     });
+    input.replyState.answered = true;
+    return;
+  }
+
+  if (choice === "cancel") {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      content: "Deletion cancelled.",
+      embeds: [],
+      components: [],
+    });
+    input.replyState.answered = true;
     return;
   }
 
@@ -774,6 +826,7 @@ async function handleDeleteConfirm(input: {
       embeds: failureResponse("Delete Failed", "Could not delete the channel.").embeds,
       components: [],
     });
+    input.replyState.answered = true;
     return;
   }
   await input.channels.remove(channelId);
@@ -783,4 +836,5 @@ async function handleDeleteConfirm(input: {
     embeds: successResponse("Delete Complete", "Temporary channel deleted.").embeds,
     components: [],
   });
+  input.replyState.answered = true;
 }

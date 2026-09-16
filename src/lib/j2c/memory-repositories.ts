@@ -207,6 +207,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...(existing.ownerAbsentSince ? { ownerAbsentSince: existing.ownerAbsentSince } : {}),
         ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
         ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
+        ...(existing.panelOwnerId ? { panelOwnerId: existing.panelOwnerId } : {}),
         ...(emptySince ? { emptySince } : {}),
       };
       byChannel.set(channelId, next);
@@ -336,13 +337,14 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...(existing.emptySince ? { emptySince: existing.emptySince } : {}),
         ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
         ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
+        ...(existing.panelOwnerId ? { panelOwnerId: existing.panelOwnerId } : {}),
         ...(ownerAbsentSince ? { ownerAbsentSince } : {}),
       };
       byChannel.set(channelId, next);
       return cloneTemp(next);
     },
 
-    async setPanelMessage(channelId, panelMessageId, panelVersion) {
+    async setPanelMessage(channelId, panelMessageId, panelVersion, panelOwnerId) {
       const existing = byChannel.get(channelId);
       if (!existing) return undefined;
       const next: TemporaryChannelRecord = {
@@ -351,6 +353,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         rejectedUserIds: [...existing.rejectedUserIds],
         panelMessageId,
         panelVersion,
+        panelOwnerId,
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);

@@ -56,6 +56,7 @@ export interface TemporaryChannelRepository {
     channelId: string,
     panelMessageId: string,
     panelVersion: number,
+    panelOwnerId: string,
   ): Promise<TemporaryChannelRecord | undefined>;
   remove(channelId: string): Promise<boolean>;
 }

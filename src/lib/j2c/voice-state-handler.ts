@@ -4,12 +4,18 @@ import type { CreationLifecycle } from "./creation-lifecycle.ts";
 import type { DeletionLifecycle } from "./deletion-lifecycle.ts";
 import type { GuildConfigRepository, TemporaryChannelRepository } from "./repositories.ts";
 import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
-import { VOICE_PANEL_VERSION } from "./voice-panel.ts";
-import { installVoiceControlPanel, refreshVoiceControlPanel } from "./voice-panel-service.ts";
+import {
+  installVoiceControlPanel,
+  refreshVoiceControlPanel,
+  voicePanelNeedsRepair,
+} from "./voice-panel-service.ts";
 
 export interface VoiceStateHandler {
   handle(payload: VoiceStateUpdatePayload, eventId: string, sequence?: number): Promise<void>;
 }
+
+/** Minimum delay between panel repair attempts for the same channel. */
+export const PANEL_REPAIR_COOLDOWN_MS = 60_000;
 
 async function syncOwnerAbsence(
   channels: TemporaryChannelRepository,
@@ -44,12 +50,18 @@ export function createVoiceStateHandler(options: {
   readonly logger: Logger;
   readonly discord?: DiscordApiPort;
   readonly nextSequence?: () => number;
+  readonly now?: () => number;
+  readonly panelRepairCooldownMs?: number;
 }): VoiceStateHandler {
   let localSeq = 0;
   const nextSeq = options.nextSequence ?? (() => {
     localSeq += 1;
     return localSeq;
   });
+  const now = options.now ?? (() => Date.now());
+  const repairCooldownMs = options.panelRepairCooldownMs ?? PANEL_REPAIR_COOLDOWN_MS;
+  const repairInFlight = new Set<string>();
+  const repairNextAllowedAt = new Map<string, number>();
   let cachedBot:
     | { readonly id: string; readonly username: string }
     | undefined;
@@ -61,6 +73,58 @@ export function createVoiceStateHandler(options: {
     if (me.kind !== "found") return undefined;
     cachedBot = me.value;
     return cachedBot;
+  };
+
+  const maybeRepairPanel = async (
+    record: {
+      readonly guildId: string;
+      readonly channelId: string;
+      readonly ownerId: string;
+      readonly panelMessageId?: string;
+      readonly panelVersion?: number;
+      readonly panelOwnerId?: string;
+    },
+    eventId: string,
+  ): Promise<void> => {
+    if (!options.discord || !voicePanelNeedsRepair(record)) return;
+
+    if (repairInFlight.has(record.channelId)) return;
+    const allowedAt = repairNextAllowedAt.get(record.channelId) ?? 0;
+    if (now() < allowedAt) return;
+
+    const bot = await resolveBot();
+    if (!bot) return;
+
+    repairInFlight.add(record.channelId);
+    repairNextAllowedAt.set(record.channelId, now() + repairCooldownMs);
+    try {
+      if (!record.panelMessageId) {
+        await installVoiceControlPanel({
+          discord: options.discord,
+          channels: options.channels,
+          logger: options.logger,
+          guildId: record.guildId,
+          channelId: record.channelId,
+          ownerId: record.ownerId,
+          botUserId: bot.id,
+          botUsername: bot.username,
+          requestId: `panel-repair:${record.channelId}:${eventId}`,
+        });
+      } else {
+        await refreshVoiceControlPanel({
+          discord: options.discord,
+          channels: options.channels,
+          logger: options.logger,
+          channelId: record.channelId,
+          ownerId: record.ownerId,
+          botUsername: bot.username,
+          panelMessageId: record.panelMessageId,
+          requestId: `panel-repair:${record.channelId}:${eventId}`,
+        });
+      }
+    } finally {
+      repairInFlight.delete(record.channelId);
+    }
   };
 
   return {
@@ -112,39 +176,7 @@ export function createVoiceStateHandler(options: {
             occupantIds,
             record.ownerAbsentSince,
           );
-
-          if (
-            options.discord &&
-            (!record.panelMessageId || record.panelVersion !== VOICE_PANEL_VERSION)
-          ) {
-            const bot = await resolveBot();
-            if (bot) {
-              if (!record.panelMessageId) {
-                await installVoiceControlPanel({
-                  discord: options.discord,
-                  channels: options.channels,
-                  logger: options.logger,
-                  guildId: record.guildId,
-                  channelId: record.channelId,
-                  ownerId: record.ownerId,
-                  botUserId: bot.id,
-                  botUsername: bot.username,
-                  requestId: `panel-repair:${record.channelId}:${eventId}`,
-                });
-              } else {
-                await refreshVoiceControlPanel({
-                  discord: options.discord,
-                  channels: options.channels,
-                  logger: options.logger,
-                  channelId: record.channelId,
-                  ownerId: record.ownerId,
-                  botUsername: bot.username,
-                  panelMessageId: record.panelMessageId,
-                  requestId: `panel-repair:${record.channelId}:${eventId}`,
-                });
-              }
-            }
-          }
+          await maybeRepairPanel(record, eventId);
         }
       }
 

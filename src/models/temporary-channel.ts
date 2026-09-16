@@ -48,6 +48,8 @@ const temporaryChannelSchema = new Schema(
     ownerAbsentSince: { type: Date, required: false },
     panelMessageId: { type: String, required: false, trim: true, match: SNOWFLAKE_PATTERN },
     panelVersion: { type: Number, required: false, min: 1 },
+    /** Owner ID rendered into the last successfully written panel (heading + button custom IDs). */
+    panelOwnerId: { type: String, required: false, trim: true, match: SNOWFLAKE_PATTERN },
     emptySince: { type: Date, required: false },
     deletionAttemptedAt: { type: Date, required: false },
     deletionRequestId: { type: String, required: false, trim: true, maxlength: 80 },
@@ -100,6 +102,7 @@ export interface TemporaryChannelRecord {
   readonly ownerAbsentSince?: Date;
   readonly panelMessageId?: string;
   readonly panelVersion?: number;
+  readonly panelOwnerId?: string;
   readonly emptySince?: Date;
   readonly deletionAttemptedAt?: Date;
   readonly deletionRequestId?: string;

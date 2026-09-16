@@ -55,6 +55,7 @@ function toTempRecord(doc: {
   ownerAbsentSince?: Date | null;
   panelMessageId?: string | null;
   panelVersion?: number | null;
+  panelOwnerId?: string | null;
   emptySince?: Date | null;
   deletionAttemptedAt?: Date | null;
   deletionRequestId?: string | null;
@@ -79,6 +80,7 @@ function toTempRecord(doc: {
     ...(doc.ownerAbsentSince ? { ownerAbsentSince: doc.ownerAbsentSince } : {}),
     ...(doc.panelMessageId ? { panelMessageId: doc.panelMessageId } : {}),
     ...(typeof doc.panelVersion === "number" ? { panelVersion: doc.panelVersion } : {}),
+    ...(doc.panelOwnerId ? { panelOwnerId: doc.panelOwnerId } : {}),
     ...(doc.deletionAttemptedAt ? { deletionAttemptedAt: doc.deletionAttemptedAt } : {}),
     ...(doc.deletionRequestId ? { deletionRequestId: doc.deletionRequestId } : {}),
     ...(doc.lastError ? { lastError: doc.lastError } : {}),
@@ -346,10 +348,10 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       return doc ? toTempRecord(doc) : undefined;
     },
 
-    async setPanelMessage(channelId, panelMessageId, panelVersion) {
+    async setPanelMessage(channelId, panelMessageId, panelVersion, panelOwnerId) {
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId },
-        { $set: { panelMessageId, panelVersion } },
+        { $set: { panelMessageId, panelVersion, panelOwnerId } },
         { new: true },
       )
         .lean()

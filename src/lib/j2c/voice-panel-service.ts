@@ -1,5 +1,5 @@
 import type { Logger } from "../logger.ts";
-import type { DiscordApiPort } from "../runtime-types.ts";
+import type { DiscordApiPort, DiscordOperationResult } from "../runtime-types.ts";
 import type { TemporaryChannelRepository } from "./repositories.ts";
 import { grantBotPanelTextAccess } from "./voice-panel-access.ts";
 import {
@@ -7,6 +7,28 @@ import {
   IS_COMPONENTS_V2,
   VOICE_PANEL_VERSION,
 } from "./voice-panel.ts";
+
+export function voicePanelNeedsRepair(record: {
+  readonly panelMessageId?: string;
+  readonly panelVersion?: number;
+  readonly panelOwnerId?: string;
+  readonly ownerId: string;
+}): boolean {
+  return (
+    !record.panelMessageId ||
+    record.panelVersion !== VOICE_PANEL_VERSION ||
+    record.panelOwnerId !== record.ownerId
+  );
+}
+
+async function persistPanelMessage(
+  channels: TemporaryChannelRepository,
+  channelId: string,
+  panelMessageId: string,
+  ownerId: string,
+): Promise<void> {
+  await channels.setPanelMessage(channelId, panelMessageId, VOICE_PANEL_VERSION, ownerId);
+}
 
 export async function installVoiceControlPanel(options: {
   readonly discord: DiscordApiPort;
@@ -50,7 +72,12 @@ export async function installVoiceControlPanel(options: {
       return;
     }
 
-    await options.channels.setPanelMessage(options.channelId, sent.value.id, VOICE_PANEL_VERSION);
+    await persistPanelMessage(
+      options.channels,
+      options.channelId,
+      sent.value.id,
+      options.ownerId,
+    );
   } catch (error) {
     options.logger.warn("Voice panel install failed; channel remains usable via /vc", {
       guildId: options.guildId,
@@ -58,6 +85,12 @@ export async function installVoiceControlPanel(options: {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+function shouldResendAfterEdit(result: DiscordOperationResult): boolean {
+  // Only replace the message when Discord says it is gone. Transient/forbidden
+  // failures must not create a second panel copy.
+  return result.kind === "missing";
 }
 
 export async function refreshVoiceControlPanel(options: {
@@ -85,11 +118,21 @@ export async function refreshVoiceControlPanel(options: {
       flags: IS_COMPONENTS_V2,
     });
     if (edited.kind === "ok") {
-      await options.channels.setPanelMessage(
+      await persistPanelMessage(
+        options.channels,
         options.channelId,
         options.panelMessageId,
-        VOICE_PANEL_VERSION,
+        options.ownerId,
       );
+      return;
+    }
+    if (!shouldResendAfterEdit(edited)) {
+      options.logger.warn("Voice panel edit failed; leaving existing message in place", {
+        channelId: options.channelId,
+        panelMessageId: options.panelMessageId,
+        outcome: edited.kind,
+        ...(edited.kind === "transient" ? { message: edited.message } : {}),
+      });
       return;
     }
   }
@@ -101,7 +144,7 @@ export async function refreshVoiceControlPanel(options: {
     flags: IS_COMPONENTS_V2,
   });
   if (sent.kind === "found") {
-    await options.channels.setPanelMessage(options.channelId, sent.value.id, VOICE_PANEL_VERSION);
+    await persistPanelMessage(options.channels, options.channelId, sent.value.id, options.ownerId);
   } else {
     options.logger.warn("Voice panel refresh failed", {
       channelId: options.channelId,

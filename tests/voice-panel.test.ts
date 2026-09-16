@@ -15,7 +15,7 @@ import {
   VOICE_PANEL_VERSION,
 } from "../src/lib/j2c/voice-panel.ts";
 import { createVoicePanelInteractionHandler } from "../src/lib/j2c/voice-panel-interactions.ts";
-import { installVoiceControlPanel } from "../src/lib/j2c/voice-panel-service.ts";
+import { installVoiceControlPanel, refreshVoiceControlPanel } from "../src/lib/j2c/voice-panel-service.ts";
 import { createVoiceStateHandler } from "../src/lib/j2c/voice-state-handler.ts";
 import { createCreationLifecycle } from "../src/lib/j2c/creation-lifecycle.ts";
 import { createDeletionLifecycle } from "../src/lib/j2c/deletion-lifecycle.ts";
@@ -150,6 +150,7 @@ describe("voice panel install", () => {
     const record = await channels.findByChannelId(channelId);
     expect(record?.panelMessageId).toBeTruthy();
     expect(record?.panelVersion).toBe(VOICE_PANEL_VERSION);
+    expect(record?.panelOwnerId).toBe(ownerId);
     expect(controls.channelMessages).toHaveLength(1);
     expect(controls.channelMessages[0]?.flags).toBe(IS_COMPONENTS_V2);
     expect(controls.overwriteCalls.some((call) => call.overwriteId === botId)).toBe(true);
@@ -559,5 +560,266 @@ describe("creation installs panel", () => {
     expect(record?.panelMessageId).toBeTruthy();
     expect(record?.panelVersion).toBe(VOICE_PANEL_VERSION);
     expect(controls.channelMessages.length).toBeGreaterThan(0);
+  });
+});
+
+describe("voice panel refresh duplication", () => {
+  test("transient edit failure does not send a second panel", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    await channels.setPanelMessage(channelId, "800000000000000001", VOICE_PANEL_VERSION, ownerId);
+
+    const { discord, controls } = createFakeDiscord({
+      failNextEditMessage: { kind: "transient", message: "rate_limited" },
+    });
+
+    await refreshVoiceControlPanel({
+      discord,
+      channels,
+      logger: testLogger(),
+      channelId,
+      ownerId,
+      botUsername: "Pure",
+      panelMessageId: "800000000000000001",
+      requestId: "refresh-1",
+    });
+
+    expect(controls.editedChannelMessages).toHaveLength(1);
+    expect(controls.channelMessages).toHaveLength(0);
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.panelMessageId).toBe("800000000000000001");
+  });
+
+  test("missing panel message is replaced once", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    await channels.setPanelMessage(channelId, "800000000000000001", VOICE_PANEL_VERSION, ownerId);
+
+    const { discord, controls } = createFakeDiscord({
+      failNextEditMessage: { kind: "missing" },
+    });
+
+    await refreshVoiceControlPanel({
+      discord,
+      channels,
+      logger: testLogger(),
+      channelId,
+      ownerId,
+      botUsername: "Pure",
+      panelMessageId: "800000000000000001",
+      requestId: "refresh-2",
+    });
+
+    expect(controls.channelMessages).toHaveLength(1);
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.panelMessageId).toBe(controls.channelMessages[0]?.id);
+    expect(record?.panelOwnerId).toBe(ownerId);
+  });
+});
+
+describe("voice panel repair throttle", () => {
+  test("does not retry install within the cooldown window", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "{username}'s channel",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord({
+      currentUser: { id: botId, username: "Pure" },
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+      failNextSendMessage: { kind: "transient", message: "fail" },
+    });
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.markReady();
+    occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 1 });
+
+    let nowMs = 1_000;
+    const deletion = createDeletionLifecycle({
+      channels,
+      discord,
+      metrics,
+      logger: testLogger(),
+      occupancy,
+    });
+    const reservationService = createReservationService({ reservations, channels, metrics });
+    const creation = createCreationLifecycle({
+      configs,
+      channels,
+      reservations,
+      reservationService,
+      discord,
+      metrics,
+      logger: testLogger(),
+    });
+    const voice = createVoiceStateHandler({
+      configs,
+      channels,
+      creation,
+      deletion,
+      occupancy,
+      logger: testLogger(),
+      discord,
+      now: () => nowMs,
+      panelRepairCooldownMs: 60_000,
+    });
+
+    await voice.handle({ guildId, userId: ownerId, channelId }, "evt-1", 2);
+    // First repair attempt consumes the forced send failure.
+    expect(controls.failNextSendMessage).toBeUndefined();
+    expect(controls.channelMessages).toHaveLength(0);
+
+    controls.failNextSendMessage = { kind: "transient", message: "fail-again" };
+    nowMs = 30_000;
+    await voice.handle({ guildId, userId: ownerId, channelId }, "evt-2", 3);
+    // Still within cooldown: repair skipped, failure token unused.
+    expect(controls.channelMessages).toHaveLength(0);
+    expect(controls.failNextSendMessage).toEqual({ kind: "transient", message: "fail-again" });
+
+    nowMs = 70_000;
+    await voice.handle({ guildId, userId: ownerId, channelId }, "evt-3", 4);
+    expect(controls.failNextSendMessage).toBeUndefined();
+  });
+});
+
+describe("voice panel access gates", () => {
+  test("rejects controls when Discord channel is not a guild voice channel", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "text",
+            type: ChannelTypes.GuildText,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        customId: `${VOICE_PANEL_PREFIX}:lock:${channelId}:${ownerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "managed voice channel",
+    );
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.locked).toBe(false);
+  });
+
+  test("delete cancel revalidates ownership", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId, memberId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${memberId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        userId: memberId,
+        customId: `voice-delete:cancel:${channelId}`,
+      }),
+    );
+
+    expect(controls.deferredUpdates).toContain("500000000000000001");
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "You must own this voice channel",
+    );
   });
 });
