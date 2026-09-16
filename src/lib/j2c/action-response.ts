@@ -4,14 +4,8 @@ export const ACTION_EMOJIS = {
   error: "<:error:1543407530380624037>",
 } as const;
 
-export const ACTION_EMBED_COLORS = {
-  success: 0x3ba55d,
-  error: 0xed4245,
-} as const;
-
 export interface ActionEmbed {
   readonly description: string;
-  readonly color: number;
 }
 
 /** Ephemeral slash-command reply payload (embed-only). */
@@ -27,7 +21,6 @@ export function successResponse(message: string, details?: string | readonly str
     embeds: [
       {
         description: formatActionDescription(ACTION_EMOJIS.success, message, details),
-        color: ACTION_EMBED_COLORS.success,
       },
     ],
   };
@@ -41,7 +34,6 @@ export function failureResponse(message: string, details?: string | readonly str
     embeds: [
       {
         description: formatActionDescription(ACTION_EMOJIS.error, message, details),
-        color: ACTION_EMBED_COLORS.error,
       },
     ],
   };
