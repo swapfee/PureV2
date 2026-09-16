@@ -1,0 +1,377 @@
+import { CreationReservationModel, type CreationReservationRecord } from "../../models/creation-reservation.ts";
+import { GuildConfigModel, type GuildConfigRecord, type UpsertGuildConfigInput } from "../../models/guild-config.ts";
+import {
+  TemporaryChannelModel,
+  type TemporaryChannelRecord,
+  type TemporaryChannelStatus,
+} from "../../models/temporary-channel.ts";
+import { validateUpsertGuildConfigInput } from "./validation.ts";
+import type {
+  AcquireReservationInput,
+  AcquireReservationResult,
+  CreateTemporaryChannelInput,
+  CreationReservationRepository,
+  GuildConfigRepository,
+  TemporaryChannelRepository,
+} from "./repositories.ts";
+
+function toGuildRecord(doc: {
+  guildId: string;
+  enabled: boolean;
+  lobbyChannelId: string;
+  categoryId: string;
+  channelNameTemplate: string;
+  defaultUserLimit?: number | null;
+  moderatorRoleIds: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}): GuildConfigRecord {
+  return {
+    guildId: doc.guildId,
+    enabled: doc.enabled,
+    lobbyChannelId: doc.lobbyChannelId,
+    categoryId: doc.categoryId,
+    channelNameTemplate: doc.channelNameTemplate,
+    ...(doc.defaultUserLimit === undefined || doc.defaultUserLimit === null
+      ? {}
+      : { defaultUserLimit: doc.defaultUserLimit }),
+    moderatorRoleIds: [...doc.moderatorRoleIds],
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function toTempRecord(doc: {
+  guildId: string;
+  channelId: string;
+  ownerId: string;
+  lobbyChannelId: string;
+  status: TemporaryChannelStatus;
+  reservationId: string;
+  creationRequestId: string;
+  occupantIds: string[];
+  emptySince?: Date | null;
+  deletionAttemptedAt?: Date | null;
+  deletionRequestId?: string | null;
+  lastError?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): TemporaryChannelRecord {
+  return {
+    guildId: doc.guildId,
+    channelId: doc.channelId,
+    ownerId: doc.ownerId,
+    lobbyChannelId: doc.lobbyChannelId,
+    status: doc.status,
+    reservationId: doc.reservationId,
+    creationRequestId: doc.creationRequestId,
+    occupantIds: [...doc.occupantIds],
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    ...(doc.emptySince ? { emptySince: doc.emptySince } : {}),
+    ...(doc.deletionAttemptedAt ? { deletionAttemptedAt: doc.deletionAttemptedAt } : {}),
+    ...(doc.deletionRequestId ? { deletionRequestId: doc.deletionRequestId } : {}),
+    ...(doc.lastError ? { lastError: doc.lastError } : {}),
+  };
+}
+
+function toReservationRecord(doc: {
+  reservationId: string;
+  guildId: string;
+  memberId: string;
+  eventId: string;
+  status: CreationReservationRecord["status"];
+  channelId?: string | null;
+  creationRequestId: string;
+  expiresAt: Date;
+  failureReason?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): CreationReservationRecord {
+  return {
+    reservationId: doc.reservationId,
+    guildId: doc.guildId,
+    memberId: doc.memberId,
+    eventId: doc.eventId,
+    status: doc.status,
+    creationRequestId: doc.creationRequestId,
+    expiresAt: doc.expiresAt,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    ...(doc.channelId ? { channelId: doc.channelId } : {}),
+    ...(doc.failureReason ? { failureReason: doc.failureReason } : {}),
+  };
+}
+
+export function createMongooseGuildConfigRepository(): GuildConfigRepository {
+  return {
+    async findByGuildId(guildId) {
+      const doc = await GuildConfigModel.findOne({ guildId }).lean().exec();
+      return doc ? toGuildRecord(doc) : undefined;
+    },
+    async upsert(input: UpsertGuildConfigInput) {
+      const validated = validateUpsertGuildConfigInput(input);
+      const update =
+        validated.defaultUserLimit === undefined
+          ? {
+              $set: {
+                enabled: validated.enabled,
+                lobbyChannelId: validated.lobbyChannelId,
+                categoryId: validated.categoryId,
+                channelNameTemplate: validated.channelNameTemplate,
+                moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+              },
+              $unset: { defaultUserLimit: 1 },
+            }
+          : {
+              $set: {
+                enabled: validated.enabled,
+                lobbyChannelId: validated.lobbyChannelId,
+                categoryId: validated.categoryId,
+                channelNameTemplate: validated.channelNameTemplate,
+                moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+                defaultUserLimit: validated.defaultUserLimit,
+              },
+            };
+      const doc = await GuildConfigModel.findOneAndUpdate({ guildId: validated.guildId }, update, {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      })
+        .lean()
+        .exec();
+      if (!doc) throw new Error("Failed to upsert guild config");
+      return toGuildRecord(doc);
+    },
+  };
+}
+
+export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepository {
+  return {
+    async create(input: CreateTemporaryChannelInput) {
+      const doc = await TemporaryChannelModel.create({
+        guildId: input.guildId,
+        channelId: input.channelId,
+        ownerId: input.ownerId,
+        lobbyChannelId: input.lobbyChannelId,
+        status: input.status,
+        reservationId: input.reservationId,
+        creationRequestId: input.creationRequestId,
+        occupantIds: [...(input.occupantIds ?? [])],
+      });
+      return toTempRecord(doc.toObject());
+    },
+
+    async findByChannelId(channelId) {
+      const doc = await TemporaryChannelModel.findOne({ channelId }).lean().exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async findActiveOrCreatingByOwner(guildId, ownerId) {
+      const doc = await TemporaryChannelModel.findOne({
+        guildId,
+        ownerId,
+        status: { $in: ["creating", "active"] },
+      })
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async findBlockingOwnedChannel(guildId, ownerId) {
+      const doc = await TemporaryChannelModel.findOne({
+        guildId,
+        ownerId,
+        status: { $in: ["creating", "active", "deleting"] },
+      })
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async listByStatus(statuses) {
+      const docs = await TemporaryChannelModel.find({ status: { $in: [...statuses] } })
+        .lean()
+        .exec();
+      return docs.map(toTempRecord);
+    },
+
+    async listActiveByGuild(guildId) {
+      const docs = await TemporaryChannelModel.find({ guildId, status: "active" }).lean().exec();
+      return docs.map(toTempRecord);
+    },
+
+    async countByStatus(status) {
+      return TemporaryChannelModel.countDocuments({ status }).exec();
+    },
+
+    async markActive(channelId, occupantIds) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId },
+        { $set: { status: "active", occupantIds: [...occupantIds] }, $unset: { emptySince: 1 } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async setOccupants(channelId, occupantIds, emptySince) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId },
+        emptySince
+          ? { $set: { occupantIds: [...occupantIds], emptySince } }
+          : { $set: { occupantIds: [...occupantIds] }, $unset: { emptySince: 1 } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async beginDeleting(channelId, deletionRequestId, attemptedAt) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: "active" },
+        {
+          $set: {
+            status: "deleting",
+            deletionRequestId,
+            deletionAttemptedAt: attemptedAt,
+          },
+        },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async markStale(channelId, lastError) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId },
+        { $set: { status: "stale", lastError } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async remove(channelId) {
+      const result = await TemporaryChannelModel.deleteOne({ channelId }).exec();
+      return result.deletedCount > 0;
+    },
+  };
+}
+
+export function createMongooseCreationReservationRepository(): CreationReservationRepository {
+  return {
+    async acquire(input: AcquireReservationInput): Promise<AcquireReservationResult> {
+      const replay = await CreationReservationModel.findOne({ eventId: input.eventId }).lean().exec();
+      if (replay) return { outcome: "replay", reservation: toReservationRecord(replay) };
+
+      await CreationReservationModel.updateMany(
+        {
+          guildId: input.guildId,
+          memberId: input.memberId,
+          status: "reserved",
+          expiresAt: { $lte: new Date() },
+        },
+        { $set: { status: "expired" } },
+      ).exec();
+
+      const existing = await CreationReservationModel.findOne({
+        guildId: input.guildId,
+        memberId: input.memberId,
+        status: "reserved",
+      })
+        .lean()
+        .exec();
+      if (existing) {
+        return { outcome: "already_reserved", reservation: toReservationRecord(existing) };
+      }
+
+      try {
+        const created = await CreationReservationModel.create({
+          reservationId: input.reservationId,
+          guildId: input.guildId,
+          memberId: input.memberId,
+          eventId: input.eventId,
+          status: "reserved",
+          creationRequestId: input.creationRequestId,
+          expiresAt: input.expiresAt,
+        });
+        return { outcome: "acquired", reservation: toReservationRecord(created.toObject()) };
+      } catch (error) {
+        const concurrent = await CreationReservationModel.findOne({
+          guildId: input.guildId,
+          memberId: input.memberId,
+          status: "reserved",
+        })
+          .lean()
+          .exec();
+        if (concurrent) {
+          return { outcome: "already_reserved", reservation: toReservationRecord(concurrent) };
+        }
+        throw error;
+      }
+    },
+
+    async findByReservationId(reservationId) {
+      const doc = await CreationReservationModel.findOne({ reservationId }).lean().exec();
+      return doc ? toReservationRecord(doc) : undefined;
+    },
+
+    async findByEventId(eventId) {
+      const doc = await CreationReservationModel.findOne({ eventId }).lean().exec();
+      return doc ? toReservationRecord(doc) : undefined;
+    },
+
+    async findActive(guildId, memberId) {
+      const doc = await CreationReservationModel.findOne({
+        guildId,
+        memberId,
+        status: "reserved",
+        expiresAt: { $gt: new Date() },
+      })
+        .lean()
+        .exec();
+      return doc ? toReservationRecord(doc) : undefined;
+    },
+
+    async complete(reservationId, channelId) {
+      const doc = await CreationReservationModel.findOneAndUpdate(
+        { reservationId },
+        { $set: { status: "completed", channelId } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toReservationRecord(doc) : undefined;
+    },
+
+    async fail(reservationId, reason) {
+      const doc = await CreationReservationModel.findOneAndUpdate(
+        { reservationId },
+        { $set: { status: "failed", failureReason: reason } },
+        { new: true },
+      )
+        .lean()
+        .exec();
+      return doc ? toReservationRecord(doc) : undefined;
+    },
+
+    async expireDue(now) {
+      const result = await CreationReservationModel.updateMany(
+        { status: "reserved", expiresAt: { $lte: now } },
+        { $set: { status: "expired" } },
+      ).exec();
+      return result.modifiedCount;
+    },
+
+    async listByStatus(status) {
+      const docs = await CreationReservationModel.find({ status }).lean().exec();
+      return docs.map(toReservationRecord);
+    },
+  };
+}

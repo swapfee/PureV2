@@ -1,0 +1,38 @@
+{
+  "name": "purev2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "start": "bun run index.ts",
+    "start:prod": "bun run index.ts",
+    "dev": "bun --watch run index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "oxlint --type-aware --type-check --deny-warnings .",
+    "test": "bun test",
+    "check": "bun run typecheck && bun run lint && bun test",
+    "docker:build": "docker build -t purev2:local .",
+    "docker:config": "docker compose config",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f --tail=200",
+    "indexes:plan": "bun run src/cli/indexes.ts",
+    "indexes:apply": "bun run src/cli/indexes.ts -- --apply",
+    "indexes:verify": "bun run src/cli/indexes.ts -- --verify",
+    "commands:register": "bun run src/cli/register-commands.ts",
+    "commands:register:guild": "bun run src/cli/register-commands.ts",
+    "commands:register:global": "bun run src/cli/register-commands.ts -- --global"
+  },
+  "dependencies": {
+    "discordeno": "21.0.0",
+    "mongoose": "9.10.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "oxlint": "1.83.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2"
+  }
+}

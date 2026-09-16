@@ -1,0 +1,50 @@
+# PureV2 — one coordinator container with in-process Bun child workers.
+# MongoDB is Atlas (external). Do not add local Mongo or Redis.
+#
+# Health is published ONLY to the VPS loopback:
+#   curl http://127.0.0.1:3000/readyz
+# REST proxy (8081) is never published.
+
+services:
+  purev2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: purev2:local
+    container_name: purev2
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    # Do not publish 8081 / REST proxy.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const r=await fetch('http://127.0.0.1:'+(process.env.HEALTH_PORT||'3000')+'/healthz'); if(!r.ok) process.exit(1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1536m
+    cpus: 1.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      BUN_RUNTIME_TRANSPILER_CACHE_PATH: /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # No privileged mode, no Docker socket mount, no extra capabilities.

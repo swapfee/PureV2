@@ -1,0 +1,13 @@
+.git
+.cursor
+.vscode
+.idea
+.env
+.env.*
+!.env.example
+*.log
+coverage
+dist
+agent-transcripts
+docs
+**/*.md

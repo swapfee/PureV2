@@ -1,0 +1,342 @@
+import type { CreationReservationRecord } from "../../models/creation-reservation.ts";
+import type { GuildConfigRecord, UpsertGuildConfigInput } from "../../models/guild-config.ts";
+import type { TemporaryChannelRecord, TemporaryChannelStatus } from "../../models/temporary-channel.ts";
+import { validateUpsertGuildConfigInput } from "./validation.ts";
+import type {
+  AcquireReservationInput,
+  AcquireReservationResult,
+  CreateTemporaryChannelInput,
+  CreationReservationRepository,
+  GuildConfigRepository,
+  TemporaryChannelRepository,
+} from "./repositories.ts";
+
+function cloneGuild(record: GuildConfigRecord): GuildConfigRecord {
+  return {
+    ...record,
+    moderatorRoleIds: [...record.moderatorRoleIds],
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+  };
+}
+
+function cloneTemp(record: TemporaryChannelRecord): TemporaryChannelRecord {
+  return {
+    ...record,
+    occupantIds: [...record.occupantIds],
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+    ...(record.emptySince ? { emptySince: new Date(record.emptySince) } : {}),
+    ...(record.deletionAttemptedAt ? { deletionAttemptedAt: new Date(record.deletionAttemptedAt) } : {}),
+  };
+}
+
+function cloneReservation(record: CreationReservationRecord): CreationReservationRecord {
+  return {
+    ...record,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+    expiresAt: new Date(record.expiresAt),
+  };
+}
+
+export function createMemoryGuildConfigRepository(): GuildConfigRepository {
+  const byGuild = new Map<string, GuildConfigRecord>();
+
+  return {
+    async findByGuildId(guildId) {
+      const found = byGuild.get(guildId);
+      return found ? cloneGuild(found) : undefined;
+    },
+    async upsert(input: UpsertGuildConfigInput) {
+      const validated = validateUpsertGuildConfigInput(input);
+      const now = new Date();
+      const existing = byGuild.get(validated.guildId);
+      const record: GuildConfigRecord = {
+        guildId: validated.guildId,
+        enabled: validated.enabled,
+        lobbyChannelId: validated.lobbyChannelId,
+        categoryId: validated.categoryId,
+        channelNameTemplate: validated.channelNameTemplate,
+        ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
+        moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      byGuild.set(record.guildId, record);
+      return cloneGuild(record);
+    },
+  };
+}
+
+function ownerKey(guildId: string, ownerId: string): string {
+  return `${guildId}:${ownerId}`;
+}
+
+export function createMemoryTemporaryChannelRepository(): TemporaryChannelRepository {
+  const byChannel = new Map<string, TemporaryChannelRecord>();
+
+  const assertOwnerUniqueness = (input: CreateTemporaryChannelInput): void => {
+    if (input.status !== "creating" && input.status !== "active" && input.status !== "deleting") return;
+    for (const record of byChannel.values()) {
+      if (
+        record.guildId === input.guildId &&
+        record.ownerId === input.ownerId &&
+        (record.status === "creating" || record.status === "active" || record.status === "deleting") &&
+        record.channelId !== input.channelId
+      ) {
+        throw new Error(`Owner ${ownerKey(input.guildId, input.ownerId)} already has an active channel`);
+      }
+    }
+  };
+
+  return {
+    async create(input) {
+      assertOwnerUniqueness(input);
+      if (byChannel.has(input.channelId)) throw new Error(`Channel ${input.channelId} already exists`);
+      const now = new Date();
+      const record: TemporaryChannelRecord = {
+        guildId: input.guildId,
+        channelId: input.channelId,
+        ownerId: input.ownerId,
+        lobbyChannelId: input.lobbyChannelId,
+        status: input.status,
+        reservationId: input.reservationId,
+        creationRequestId: input.creationRequestId,
+        occupantIds: [...(input.occupantIds ?? [])],
+        createdAt: now,
+        updatedAt: now,
+      };
+      byChannel.set(record.channelId, record);
+      return cloneTemp(record);
+    },
+
+    async findByChannelId(channelId) {
+      const found = byChannel.get(channelId);
+      return found ? cloneTemp(found) : undefined;
+    },
+
+    async findActiveOrCreatingByOwner(guildId, ownerId) {
+      for (const record of byChannel.values()) {
+        if (
+          record.guildId === guildId &&
+          record.ownerId === ownerId &&
+          (record.status === "creating" || record.status === "active")
+        ) {
+          return cloneTemp(record);
+        }
+      }
+      return undefined;
+    },
+
+    async findBlockingOwnedChannel(guildId, ownerId) {
+      for (const record of byChannel.values()) {
+        if (
+          record.guildId === guildId &&
+          record.ownerId === ownerId &&
+          (record.status === "creating" || record.status === "active" || record.status === "deleting")
+        ) {
+          return cloneTemp(record);
+        }
+      }
+      return undefined;
+    },
+
+    async listByStatus(statuses) {
+      const set = new Set(statuses);
+      return [...byChannel.values()].filter((record) => set.has(record.status)).map(cloneTemp);
+    },
+
+    async listActiveByGuild(guildId) {
+      return [...byChannel.values()]
+        .filter((record) => record.guildId === guildId && record.status === "active")
+        .map(cloneTemp);
+    },
+
+    async countByStatus(status) {
+      let count = 0;
+      for (const record of byChannel.values()) {
+        if (record.status === status) count += 1;
+      }
+      return count;
+    },
+
+    async markActive(channelId, occupantIds) {
+      const existing = byChannel.get(channelId);
+      if (!existing) return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        status: "active",
+        occupantIds: [...occupantIds],
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async setOccupants(channelId, occupantIds, emptySince) {
+      const existing = byChannel.get(channelId);
+      if (!existing) return undefined;
+      const next: TemporaryChannelRecord = {
+        guildId: existing.guildId,
+        channelId: existing.channelId,
+        ownerId: existing.ownerId,
+        lobbyChannelId: existing.lobbyChannelId,
+        status: existing.status,
+        reservationId: existing.reservationId,
+        creationRequestId: existing.creationRequestId,
+        occupantIds: [...occupantIds],
+        createdAt: existing.createdAt,
+        updatedAt: new Date(),
+        ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
+        ...(existing.deletionRequestId ? { deletionRequestId: existing.deletionRequestId } : {}),
+        ...(existing.lastError ? { lastError: existing.lastError } : {}),
+        ...(emptySince ? { emptySince } : {}),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async beginDeleting(channelId, deletionRequestId, attemptedAt) {
+      const existing = byChannel.get(channelId);
+      if (!existing || existing.status !== "active") return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        status: "deleting",
+        deletionRequestId,
+        deletionAttemptedAt: attemptedAt,
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async markStale(channelId, lastError) {
+      const existing = byChannel.get(channelId);
+      if (!existing) return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        status: "stale",
+        lastError,
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async remove(channelId) {
+      return byChannel.delete(channelId);
+    },
+  };
+}
+
+export function createMemoryCreationReservationRepository(now: () => Date = () => new Date()): CreationReservationRepository {
+  const byId = new Map<string, CreationReservationRecord>();
+
+  return {
+    async acquire(input: AcquireReservationInput): Promise<AcquireReservationResult> {
+      const replay = [...byId.values()].find((record) => record.eventId === input.eventId);
+      if (replay) return { outcome: "replay", reservation: cloneReservation(replay) };
+
+      for (const record of byId.values()) {
+        if (
+          record.guildId === input.guildId &&
+          record.memberId === input.memberId &&
+          record.status === "reserved"
+        ) {
+          if (record.expiresAt.getTime() <= now().getTime()) {
+            byId.set(record.reservationId, {
+              ...record,
+              status: "expired",
+              updatedAt: now(),
+            });
+            continue;
+          }
+          return { outcome: "already_reserved", reservation: cloneReservation(record) };
+        }
+      }
+
+      const created: CreationReservationRecord = {
+        reservationId: input.reservationId,
+        guildId: input.guildId,
+        memberId: input.memberId,
+        eventId: input.eventId,
+        status: "reserved",
+        creationRequestId: input.creationRequestId,
+        expiresAt: new Date(input.expiresAt),
+        createdAt: now(),
+        updatedAt: now(),
+      };
+      byId.set(created.reservationId, created);
+      return { outcome: "acquired", reservation: cloneReservation(created) };
+    },
+
+    async findByReservationId(reservationId) {
+      const found = byId.get(reservationId);
+      return found ? cloneReservation(found) : undefined;
+    },
+
+    async findByEventId(eventId) {
+      for (const record of byId.values()) {
+        if (record.eventId === eventId) return cloneReservation(record);
+      }
+      return undefined;
+    },
+
+    async findActive(guildId, memberId) {
+      for (const record of byId.values()) {
+        if (record.guildId === guildId && record.memberId === memberId && record.status === "reserved") {
+          if (record.expiresAt.getTime() <= now().getTime()) {
+            byId.set(record.reservationId, { ...record, status: "expired", updatedAt: now() });
+            return undefined;
+          }
+          return cloneReservation(record);
+        }
+      }
+      return undefined;
+    },
+
+    async complete(reservationId, channelId) {
+      const existing = byId.get(reservationId);
+      if (!existing) return undefined;
+      const next: CreationReservationRecord = {
+        ...existing,
+        status: "completed",
+        channelId,
+        updatedAt: now(),
+      };
+      byId.set(reservationId, next);
+      return cloneReservation(next);
+    },
+
+    async fail(reservationId, reason) {
+      const existing = byId.get(reservationId);
+      if (!existing) return undefined;
+      const next: CreationReservationRecord = {
+        ...existing,
+        status: "failed",
+        failureReason: reason,
+        updatedAt: now(),
+      };
+      byId.set(reservationId, next);
+      return cloneReservation(next);
+    },
+
+    async expireDue(at) {
+      let count = 0;
+      for (const [id, record] of byId) {
+        if (record.status === "reserved" && record.expiresAt.getTime() <= at.getTime()) {
+          byId.set(id, { ...record, status: "expired", updatedAt: at });
+          count += 1;
+        }
+      }
+      return count;
+    },
+
+    async listByStatus(status) {
+      return [...byId.values()].filter((record) => record.status === status).map(cloneReservation);
+    },
+  };
+}
+
+export type { TemporaryChannelStatus };

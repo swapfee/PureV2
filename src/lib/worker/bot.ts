@@ -1,0 +1,260 @@
+import {
+  ChannelTypes,
+  createBot,
+  InteractionResponseTypes,
+} from "discordeno";
+
+import type { WorkerConfig } from "../config.ts";
+import { restProxyBaseUrl } from "../config.ts";
+import { COORDINATOR_INTENTS } from "../coordinator/gateway.ts";
+import { REST_REQUEST_ID_HEADER } from "../coordinator/rest.ts";
+import { toDiscordOperationResult, toDiscordValueResult } from "../j2c/discord-results.ts";
+import type { Logger } from "../logger.ts";
+import { createDiscordenoLogger } from "../logger.ts";
+import type {
+  CreateVoiceChannelRequest,
+  DiscordApiPort,
+  InteractionResponseRequest,
+  PermissionOverwrite,
+} from "../runtime-types.ts";
+import { workerDesiredProperties } from "./desired-properties.ts";
+import { createWorkerBotAdapter } from "./synthetic-token.ts";
+
+function buildBot(config: WorkerConfig, logger: Logger) {
+  const adapter = createWorkerBotAdapter({ applicationId: config.DISCORD_APPLICATION_ID });
+  return createBot({
+    token: adapter.token,
+    applicationId: BigInt(adapter.applicationId),
+    intents: COORDINATOR_INTENTS,
+    desiredProperties: workerDesiredProperties,
+    rest: {
+      proxy: {
+        baseUrl: restProxyBaseUrl(config),
+        authorization: config.REST_PROXY_AUTHORIZATION,
+      },
+    },
+    loggerFactory: (name) => createDiscordenoLogger(logger.child({ component: name })),
+  });
+}
+
+export type WorkerBot = ReturnType<typeof buildBot>;
+
+export interface WorkerBotBundle {
+  readonly bot: WorkerBot;
+  readonly discord: DiscordApiPort;
+}
+
+function withReason<T extends Record<string, unknown>>(
+  base: T,
+  reason: string | undefined,
+): T & { reason?: string } {
+  return reason === undefined ? base : { ...base, reason };
+}
+
+function readOverwrites(raw: unknown): PermissionOverwrite[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const overwrites: PermissionOverwrite[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const id = Reflect.get(item, "id");
+    const type = Reflect.get(item, "type");
+    const allow = Reflect.get(item, "allow");
+    const deny = Reflect.get(item, "deny");
+    if (id === undefined || (type !== 0 && type !== 1)) continue;
+    overwrites.push({
+      id: String(id),
+      type,
+      allow: allow === undefined ? "0" : String(allow),
+      deny: deny === undefined ? "0" : String(deny),
+    });
+  }
+  return overwrites;
+}
+
+export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBotBundle {
+  const bot = buildBot(config, logger);
+  // Never call bot.start() — gateway shards belong exclusively to the coordinator.
+
+  const discord: DiscordApiPort = {
+    async respondToInteraction(request: InteractionResponseRequest): Promise<void> {
+      await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
+        type: InteractionResponseTypes.ChannelMessageWithSource,
+        data: {
+          content: request.content,
+          ...(request.ephemeral === false ? {} : { flags: 64 }),
+        },
+      });
+    },
+
+    async deferInteraction(request) {
+      await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
+        type: InteractionResponseTypes.DeferredChannelMessageWithSource,
+        data: request.ephemeral === false ? {} : { flags: 64 },
+      });
+    },
+
+    async editInteractionResponse(request) {
+      await bot.helpers.editOriginalInteractionResponse(request.interactionToken, {
+        content: request.content,
+      });
+    },
+
+    async createVoiceChannel(request: CreateVoiceChannelRequest) {
+      try {
+        const created = await bot.rest.makeRequest<{ id: string | number | bigint }>(
+          "POST",
+          bot.rest.routes.guilds.channels(request.guildId),
+          withReason(
+            {
+              body: {
+                name: request.name,
+                type: ChannelTypes.GuildVoice,
+                parent_id: request.parentId,
+                ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "found" as const, value: { id: String(created.id) } };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async deleteChannel(request) {
+      try {
+        await bot.rest.makeRequest(
+          "DELETE",
+          bot.rest.routes.channels.channel(request.channelId),
+          withReason(
+            {
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async getChannel(request) {
+      try {
+        const channel = await bot.helpers.getChannel(request.channelId);
+        const overwrites = readOverwrites(Reflect.get(channel, "permissionOverwrites"));
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(channel.id),
+            ...(channel.name === undefined ? {} : { name: channel.name }),
+            ...(Reflect.get(channel, "userLimit") === undefined
+              ? {}
+              : { userLimit: Number(Reflect.get(channel, "userLimit")) }),
+            ...(overwrites === undefined ? {} : { permissionOverwrites: overwrites }),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async editChannel(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PATCH",
+          bot.rest.routes.channels.channel(request.channelId),
+          withReason(
+            {
+              body: {
+                ...(request.name === undefined ? {} : { name: request.name }),
+                ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async editChannelPermissionOverwrite(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PUT",
+          bot.rest.routes.channels.overwrite(request.channelId, request.overwriteId),
+          withReason(
+            {
+              body: {
+                type: request.type,
+                allow: request.allow,
+                deny: request.deny,
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async getUser(request) {
+      try {
+        const user = await bot.helpers.getUser(request.userId);
+        const botFlag = Reflect.get(user, "bot");
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(user.id),
+            bot: typeof botFlag === "boolean" ? botFlag : false,
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async getUserVoiceChannel(request) {
+      try {
+        const voiceState = await bot.helpers.getUserVoiceState(request.guildId, request.userId);
+        return {
+          kind: "found" as const,
+          value: {
+            channelId: voiceState.channelId === undefined ? null : String(voiceState.channelId),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async moveMemberToChannel(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PATCH",
+          bot.rest.routes.guilds.members.member(request.guildId, request.userId),
+          withReason(
+            {
+              body: { channel_id: request.channelId },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+  };
+
+  return { bot, discord };
+}
