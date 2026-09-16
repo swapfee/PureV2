@@ -6,7 +6,6 @@ import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
 import {
   createMemoryTemporaryChannelRepository,
 } from "../src/lib/j2c/memory-repositories.ts";
-import { createOwnershipService } from "../src/lib/j2c/ownership.ts";
 import { createVcCommandService, VC_COOLDOWNS_MS } from "../src/lib/j2c/vc-command-service.ts";
 import { createVcMetrics } from "../src/lib/j2c/vc-metrics.ts";
 import { createLogger } from "../src/lib/logger.ts";
@@ -93,7 +92,6 @@ async function setup() {
   const cooldowns = createCooldownStore();
   const completed = new Set<string>();
   const vc = createVcCommandService({
-    ownership: createOwnershipService(channels),
     channels,
     discord,
     logger,
@@ -127,7 +125,7 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(embedText(controls.editedInteractions[0])).toMatch(/do not own/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/managed voice channel/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
 
@@ -140,8 +138,45 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(embedText(controls.editedInteractions[0])).toMatch(/connected/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(/managed voice channel/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
+  });
+
+  test("rejects Join to Create lobby for invite and owner commands", async () => {
+    const { vc, controls, metrics } = await setup();
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, lobbyId);
+    controls.channels.set(lobbyId, {
+      id: lobbyId,
+      name: "Join to Create",
+      guildId,
+      permissionOverwrites: [],
+    });
+
+    await vc.execute(
+      interaction({
+        id: "lobby-lock",
+        guildId,
+        options: [{ name: "lock", type: 1 }],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/managed voice channel/i);
+
+    await vc.execute(
+      interaction({
+        id: "lobby-invite",
+        guildId,
+        options: [
+          {
+            name: "invite",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/managed voice channel/i);
+    expect(controls.dmCalls).toHaveLength(0);
+    expect(metrics.snapshot().authorizationFailures).toBeGreaterThanOrEqual(2);
   });
 
   test("rejects when Discord channel is missing", async () => {

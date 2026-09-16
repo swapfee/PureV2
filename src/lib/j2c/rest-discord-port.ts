@@ -128,7 +128,11 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
           },
         };
       } catch (error) {
-        return toDiscordValueResult(error);
+        const result = toDiscordValueResult<{ channelId: string | null }>(error);
+        if (result.kind === "missing") {
+          return { kind: "found", value: { channelId: null } };
+        }
+        return result;
       }
     },
 

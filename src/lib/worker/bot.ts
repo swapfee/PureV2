@@ -329,7 +329,12 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           },
         };
       } catch (error) {
-        return toDiscordValueResult(error);
+        const result = toDiscordValueResult<{ channelId: string | null }>(error);
+        // Discord returns 404 when the member is not connected to any voice channel.
+        if (result.kind === "missing") {
+          return { kind: "found", value: { channelId: null } };
+        }
+        return result;
       }
     },
 

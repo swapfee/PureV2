@@ -83,7 +83,6 @@ export async function runWorkerMain(): Promise<void> {
   j2c.markIndexesVerified(true);
 
   const vc = createVcCommandService({
-    ownership: j2c.ownership,
     channels: channelsRepo,
     discord,
     logger: logger.child({ component: "vc" }),

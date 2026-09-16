@@ -1,16 +1,13 @@
 import type { TemporaryChannelRecord } from "../../models/temporary-channel.ts";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort } from "../runtime-types.ts";
-import type { OwnershipService } from "./ownership.ts";
 import type { TemporaryChannelRepository } from "./repositories.ts";
 
 export type VcAuthFailure =
   | "dm_not_allowed"
-  | "no_active_channel"
   | "not_owner"
   | "channel_missing"
-  | "owner_not_connected"
-  | "member_not_connected"
+  | "not_in_managed_channel"
   | "voice_lookup_failed";
 
 export type VcAuthResult =
@@ -18,13 +15,64 @@ export type VcAuthResult =
   | { readonly ok: false; readonly reason: VcAuthFailure };
 
 /**
+ * Resolve the caller's current Discord voice channel to an active managed
+ * temporary channel record. The Join to Create lobby is never managed — it
+ * has no temporary_channels row — so lobby occupants are rejected here.
+ */
+async function resolveManagedTemporaryChannel(input: {
+  readonly guildId: string;
+  readonly userId: string;
+  readonly channels: TemporaryChannelRepository;
+  readonly discord: DiscordApiPort;
+  readonly logger: Logger;
+}): Promise<VcAuthResult> {
+  const voice = await input.discord.getUserVoiceChannel({
+    guildId: input.guildId,
+    userId: input.userId,
+  });
+  if (voice.kind !== "found") {
+    input.logger.warn("VC auth voice lookup failed", {
+      guildId: input.guildId,
+      userId: input.userId,
+      result: voice.kind,
+    });
+    return { ok: false, reason: "voice_lookup_failed" };
+  }
+  if (!voice.value.channelId) {
+    return { ok: false, reason: "not_in_managed_channel" };
+  }
+
+  const record = await input.channels.findByChannelId(voice.value.channelId);
+  // Lobby / normal guild channels are not in temporary_channels.
+  if (!record || record.status !== "active" || record.guildId !== input.guildId) {
+    return { ok: false, reason: "not_in_managed_channel" };
+  }
+
+  const discordChannel = await input.discord.getChannel({ channelId: record.channelId });
+  if (discordChannel.kind === "missing") {
+    return { ok: false, reason: "channel_missing" };
+  }
+  if (discordChannel.kind !== "found") {
+    input.logger.warn("VC auth channel lookup failed", {
+      guildId: input.guildId,
+      channelId: record.channelId,
+      userId: input.userId,
+      result: discordChannel.kind,
+    });
+    return { ok: false, reason: "voice_lookup_failed" };
+  }
+
+  return { ok: true, channel: record };
+}
+
+/**
  * Owner-only authorization for /vc commands.
- * Does not trust channel names, client-supplied channel IDs, or permission overwrites.
+ * Requires the caller to be connected to their own managed temporary channel
+ * (database record). The Join to Create lobby cannot be managed.
  */
 export async function authorizeVcOwner(input: {
   readonly guildId: string | undefined;
   readonly userId: string;
-  readonly ownership: OwnershipService;
   readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
@@ -33,44 +81,23 @@ export async function authorizeVcOwner(input: {
     return { ok: false, reason: "dm_not_allowed" };
   }
 
-  const owned = await input.ownership.findOwnedChannel(input.guildId, input.userId);
-  if (!owned || owned.status !== "active") {
-    return { ok: false, reason: "no_active_channel" };
-  }
-  if (owned.ownerId !== input.userId) {
-    return { ok: false, reason: "not_owner" };
-  }
-
-  const discordChannel = await input.discord.getChannel({ channelId: owned.channelId });
-  if (discordChannel.kind === "missing") {
-    return { ok: false, reason: "channel_missing" };
-  }
-  if (discordChannel.kind !== "found") {
-    input.logger.warn("VC auth channel lookup failed", {
-      guildId: input.guildId,
-      channelId: owned.channelId,
-      ownerId: input.userId,
-      result: discordChannel.kind,
-    });
-    return { ok: false, reason: "voice_lookup_failed" };
-  }
-
-  const voice = await input.discord.getUserVoiceChannel({
+  const resolved = await resolveManagedTemporaryChannel({
     guildId: input.guildId,
     userId: input.userId,
+    channels: input.channels,
+    discord: input.discord,
+    logger: input.logger,
   });
-  if (voice.kind !== "found") {
-    return { ok: false, reason: "voice_lookup_failed" };
+  if (!resolved.ok) return resolved;
+  if (resolved.channel.ownerId !== input.userId) {
+    return { ok: false, reason: "not_owner" };
   }
-  if (voice.value.channelId !== owned.channelId) {
-    return { ok: false, reason: "owner_not_connected" };
-  }
-
-  return { ok: true, channel: owned };
+  return resolved;
 }
 
 /**
  * Any member currently connected to a managed temporary channel.
+ * Rejects the Join to Create lobby and any non-managed voice channel.
  */
 export async function authorizeVcConnectedMember(input: {
   readonly guildId: string | undefined;
@@ -83,47 +110,21 @@ export async function authorizeVcConnectedMember(input: {
     return { ok: false, reason: "dm_not_allowed" };
   }
 
-  const voice = await input.discord.getUserVoiceChannel({
+  return resolveManagedTemporaryChannel({
     guildId: input.guildId,
     userId: input.userId,
+    channels: input.channels,
+    discord: input.discord,
+    logger: input.logger,
   });
-  if (voice.kind !== "found") {
-    return { ok: false, reason: "voice_lookup_failed" };
-  }
-  if (!voice.value.channelId) {
-    return { ok: false, reason: "member_not_connected" };
-  }
-
-  const record = await input.channels.findByChannelId(voice.value.channelId);
-  if (!record || record.status !== "active" || record.guildId !== input.guildId) {
-    return { ok: false, reason: "member_not_connected" };
-  }
-
-  const discordChannel = await input.discord.getChannel({ channelId: record.channelId });
-  if (discordChannel.kind === "missing") {
-    return { ok: false, reason: "channel_missing" };
-  }
-  if (discordChannel.kind !== "found") {
-    input.logger.warn("VC member auth channel lookup failed", {
-      guildId: input.guildId,
-      channelId: record.channelId,
-      userId: input.userId,
-      result: discordChannel.kind,
-    });
-    return { ok: false, reason: "voice_lookup_failed" };
-  }
-
-  return { ok: true, channel: record };
 }
 
 export function vcAuthUserMessage(reason: VcAuthFailure): string {
   const messages: Record<VcAuthFailure, string> = {
     dm_not_allowed: "This command can only be used in a server.",
-    no_active_channel: "You do not own an active temporary voice channel.",
     not_owner: "Only the channel owner can use this command.",
     channel_missing: "Your temporary channel no longer exists.",
-    owner_not_connected: "You must be connected to your temporary voice channel.",
-    member_not_connected: "You must be connected to a temporary voice channel.",
+    not_in_managed_channel: "You must be connected to a managed voice channel.",
     voice_lookup_failed: "Could not verify your voice state. Try again shortly.",
   };
   return messages[reason];

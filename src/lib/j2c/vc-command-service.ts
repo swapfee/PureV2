@@ -7,7 +7,6 @@ import {
   authorizeVcOwner,
   vcAuthUserMessage,
 } from "./vc-auth.ts";
-import type { OwnershipService } from "./ownership.ts";
 import type { TemporaryChannelRepository } from "./repositories.ts";
 import type { VcMetrics, VcSubcommand } from "./vc-metrics.ts";
 import {
@@ -103,7 +102,6 @@ export interface VcCommandService {
 }
 
 export function createVcCommandService(options: {
-  readonly ownership: OwnershipService;
   readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
@@ -167,7 +165,6 @@ export function createVcCommandService(options: {
           ? await authorizeVcOwner({
               guildId: interaction.guildId,
               userId: interaction.userId,
-              ownership: options.ownership,
               channels: options.channels,
               discord: options.discord,
               logger: options.logger,
