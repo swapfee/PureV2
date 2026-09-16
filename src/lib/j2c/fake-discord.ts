@@ -22,7 +22,8 @@ export interface FakeDiscordChannel {
 export interface FakeDiscordControls {
   readonly channels: Map<string, FakeDiscordChannel>;
   readonly voiceByUser: Map<string, string | null>;
-  readonly users: Map<string, { id: string; bot: boolean }>;
+  readonly users: Map<string, { id: string; bot: boolean; username?: string; globalName?: string }>;
+  readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string }>;
   readonly createCalls: CreateVoiceChannelRequest[];
   readonly guildChannelCreates: CreateGuildChannelRequest[];
   readonly deleteCalls: { channelId: string; requestId: string }[];
@@ -58,6 +59,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     channels: seed?.channels ?? new Map(),
     voiceByUser: seed?.voiceByUser ?? new Map(),
     users: seed?.users ?? new Map(),
+    members: seed?.members ?? new Map(),
     createCalls: [],
     guildChannelCreates: [],
     deleteCalls: [],
@@ -221,6 +223,15 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     },
 
     async getUser(request) {
+      const user = controls.users.get(request.userId);
+      if (!user) return { kind: "missing" };
+      return { kind: "found", value: user };
+    },
+
+    async getGuildMember(request) {
+      const key = `${request.guildId}:${request.userId}`;
+      const member = controls.members.get(key);
+      if (member) return { kind: "found", value: member };
       const user = controls.users.get(request.userId);
       if (!user) return { kind: "missing" };
       return { kind: "found", value: user };

@@ -172,18 +172,24 @@ export function wireBotEvents(
   bot.events.voiceStateUpdate = async (voiceState) => {
     const event = events.get("voiceStateUpdate");
     if (!event) return;
+    const displayNameRaw = Reflect.get(voiceState, "displayName");
+    const memberIsBot = Reflect.get(voiceState, "memberIsBot") === true;
     const member = Reflect.get(voiceState, "member");
     const memberUser =
       typeof member === "object" && member !== null ? Reflect.get(member, "user") : undefined;
     const isBot =
-      typeof memberUser === "object" &&
-      memberUser !== null &&
-      Reflect.get(memberUser, "bot") === true;
+      memberIsBot ||
+      (typeof memberUser === "object" &&
+        memberUser !== null &&
+        Reflect.get(memberUser, "bot") === true);
     const payload: VoiceStateUpdatePayload = {
       guildId: voiceState.guildId.toString(),
       userId: voiceState.userId.toString(),
       channelId: voiceState.channelId === undefined ? null : voiceState.channelId.toString(),
       ...(isBot ? { isBot: true } : {}),
+      ...(typeof displayNameRaw === "string" && displayNameRaw.trim().length > 0
+        ? { displayName: displayNameRaw.trim() }
+        : {}),
     };
     await event.execute(context, payload);
   };

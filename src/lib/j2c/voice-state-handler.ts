@@ -81,6 +81,7 @@ export function createVoiceStateHandler(options: {
           guildId: payload.guildId,
           memberId: payload.userId,
           joinedChannelId: payload.channelId,
+          ...(payload.displayName === undefined ? {} : { username: payload.displayName }),
         });
         if (outcome.kind === "failed" || outcome.kind === "cancelled") {
           options.logger.debug("Join-to-create creation outcome", {

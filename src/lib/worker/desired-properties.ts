@@ -1,4 +1,4 @@
-/** Minimal desired properties for skeleton command/event handling and future J2C. */
+/** Minimal desired properties for skeleton command/event handling and Join-to-Create. */
 export const workerDesiredProperties = {
   interaction: {
     id: true,
@@ -14,6 +14,7 @@ export const workerDesiredProperties = {
   user: {
     id: true,
     username: true,
+    globalName: true,
     bot: true,
   },
   member: {
@@ -21,6 +22,7 @@ export const workerDesiredProperties = {
     user: true,
     guildId: true,
     permissions: true,
+    nick: true,
   },
   channel: {
     id: true,

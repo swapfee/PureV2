@@ -23,6 +23,8 @@ export interface VoiceStateUpdatePayload {
   readonly userId: string;
   readonly channelId: string | null;
   readonly isBot?: boolean;
+  /** Guild nick, global display name, or username when available from the event. */
+  readonly displayName?: string;
 }
 
 export interface ReadyPayload {
@@ -136,7 +138,26 @@ export interface DiscordApiPort {
   }): Promise<DiscordOperationResult>;
   getUser(request: {
     readonly userId: string;
-  }): Promise<DiscordValueResult<{ readonly id: string; readonly bot: boolean }>>;
+  }): Promise<
+    DiscordValueResult<{
+      readonly id: string;
+      readonly bot: boolean;
+      readonly username?: string;
+      readonly globalName?: string;
+    }>
+  >;
+  getGuildMember(request: {
+    readonly guildId: string;
+    readonly userId: string;
+  }): Promise<
+    DiscordValueResult<{
+      readonly id: string;
+      readonly nick?: string;
+      readonly username?: string;
+      readonly globalName?: string;
+      readonly bot: boolean;
+    }>
+  >;
   getUserVoiceChannel(request: {
     readonly guildId: string;
     readonly userId: string;

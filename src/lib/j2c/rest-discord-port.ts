@@ -45,6 +45,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("getUser is not available on the coordinator Discord port");
     },
 
+    async getGuildMember() {
+      throw new Error("getGuildMember is not available on the coordinator Discord port");
+    },
+
     async createVoiceChannel(request: CreateVoiceChannelRequest) {
       try {
         const created = await rest.makeRequest<{ id: string | number | bigint }>(

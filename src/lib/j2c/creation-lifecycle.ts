@@ -1,6 +1,7 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, VoiceStateUpdatePayload } from "../runtime-types.ts";
 import { renderChannelName } from "./channel-name.ts";
+import { pickDisplayName } from "./display-name.ts";
 import type { J2cMetrics } from "./metrics.ts";
 import type {
   CreationReservationRepository,
@@ -50,6 +51,39 @@ export function createCreationLifecycle(options: {
   const refreshActiveGauge = async (): Promise<void> => {
     const count = await options.channels.countByStatus("active");
     options.metrics.setActiveTemporaryChannels(count);
+  };
+
+  const resolveChannelUsername = async (input: {
+    readonly guildId: string;
+    readonly memberId: string;
+    readonly username?: string;
+  }): Promise<string> => {
+    const provided = input.username?.trim();
+    if (provided && provided.length > 0) return provided.slice(0, 80);
+
+    const member = await options.discord.getGuildMember({
+      guildId: input.guildId,
+      userId: input.memberId,
+    });
+    if (member.kind === "found") {
+      const fromMember = pickDisplayName({
+        nick: member.value.nick,
+        globalName: member.value.globalName,
+        username: member.value.username,
+      });
+      if (fromMember) return fromMember;
+    }
+
+    const user = await options.discord.getUser({ userId: input.memberId });
+    if (user.kind === "found") {
+      const fromUser = pickDisplayName({
+        globalName: user.value.globalName,
+        username: user.value.username,
+      });
+      if (fromUser) return fromUser;
+    }
+
+    return "user";
   };
 
   const compensate = async (input: {
@@ -147,7 +181,12 @@ export function createCreationLifecycle(options: {
         return { kind: "cancelled", reason: "left_lobby_before_create" };
       }
 
-      const channelName = renderChannelName(config.channelNameTemplate, input.username ?? "user");
+      const channelUsername = await resolveChannelUsername({
+        guildId: input.guildId,
+        memberId: input.memberId,
+        ...(input.username === undefined ? {} : { username: input.username }),
+      });
+      const channelName = renderChannelName(config.channelNameTemplate, channelUsername);
       const created = await options.discord.createVoiceChannel({
         guildId: input.guildId,
         name: channelName,

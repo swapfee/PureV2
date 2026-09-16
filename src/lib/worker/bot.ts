@@ -9,6 +9,7 @@ import { restProxyBaseUrl } from "../config.ts";
 import { COORDINATOR_INTENTS } from "../coordinator/gateway.ts";
 import { REST_REQUEST_ID_HEADER } from "../coordinator/rest.ts";
 import { toDiscordOperationResult, toDiscordValueResult } from "../j2c/discord-results.ts";
+import { displayNameFromVoiceMember } from "../j2c/display-name.ts";
 import type { Logger } from "../logger.ts";
 import { createDiscordenoLogger } from "../logger.ts";
 import type {
@@ -23,7 +24,7 @@ import { createWorkerBotAdapter } from "./synthetic-token.ts";
 
 function buildBot(config: WorkerConfig, logger: Logger) {
   const adapter = createWorkerBotAdapter({ applicationId: config.DISCORD_APPLICATION_ID });
-  return createBot({
+  const bot = createBot({
     token: adapter.token,
     applicationId: BigInt(adapter.applicationId),
     intents: COORDINATOR_INTENTS,
@@ -36,6 +37,20 @@ function buildBot(config: WorkerConfig, logger: Logger) {
     },
     loggerFactory: (name) => createDiscordenoLogger(logger.child({ component: name })),
   });
+
+  // Discordeno's voiceState transformer drops `member`. Re-attach display name from the raw payload.
+  bot.transformers.customizers.voiceState = (_bot, payload, voiceState) => {
+    const info = displayNameFromVoiceMember(Reflect.get(payload, "member"));
+    if (info.displayName !== undefined) {
+      Reflect.set(voiceState, "displayName", info.displayName);
+    }
+    if (info.isBot) {
+      Reflect.set(voiceState, "memberIsBot", true);
+    }
+    return voiceState;
+  };
+
+  return bot;
 }
 
 export type WorkerBot = ReturnType<typeof buildBot>;
@@ -255,11 +270,46 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       try {
         const user = await bot.helpers.getUser(request.userId);
         const botFlag = Reflect.get(user, "bot");
+        const usernameRaw = Reflect.get(user, "username");
+        const globalNameRaw = Reflect.get(user, "globalName");
         return {
           kind: "found" as const,
           value: {
             id: String(user.id),
             bot: typeof botFlag === "boolean" ? botFlag : false,
+            ...(typeof usernameRaw === "string" ? { username: usernameRaw } : {}),
+            ...(typeof globalNameRaw === "string" ? { globalName: globalNameRaw } : {}),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async getGuildMember(request) {
+      try {
+        const member = await bot.helpers.getMember(request.guildId, request.userId);
+        const nickRaw = Reflect.get(member, "nick");
+        const memberUser = Reflect.get(member, "user");
+        let username: string | undefined;
+        let globalName: string | undefined;
+        let isBot = false;
+        if (typeof memberUser === "object" && memberUser !== null) {
+          const usernameRaw = Reflect.get(memberUser, "username");
+          const globalNameRaw = Reflect.get(memberUser, "globalName");
+          const botRaw = Reflect.get(memberUser, "bot");
+          if (typeof usernameRaw === "string") username = usernameRaw;
+          if (typeof globalNameRaw === "string") globalName = globalNameRaw;
+          isBot = typeof botRaw === "boolean" ? botRaw : false;
+        }
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(Reflect.get(member, "id") ?? request.userId),
+            bot: isBot,
+            ...(typeof nickRaw === "string" ? { nick: nickRaw } : {}),
+            ...(username === undefined ? {} : { username }),
+            ...(globalName === undefined ? {} : { globalName }),
           },
         };
       } catch (error) {
