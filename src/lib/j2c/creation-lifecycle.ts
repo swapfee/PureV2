@@ -243,6 +243,29 @@ export function createCreationLifecycle(options: {
         };
       }
 
+      // Install the panel while status is still "creating" so voice-state repair
+      // (active-only) cannot race and send a second copy after markActive.
+      const botUser = await options.discord.getCurrentUser();
+      if (botUser.kind === "found") {
+        await installVoiceControlPanel({
+          discord: options.discord,
+          channels: options.channels,
+          logger: options.logger,
+          guildId: input.guildId,
+          channelId,
+          ownerId: input.memberId,
+          botUserId: botUser.value.id,
+          botUsername: botUser.value.username,
+          requestId: createReqId,
+        });
+      } else {
+        options.logger.warn("Voice panel skipped; bot user unavailable", {
+          guildId: input.guildId,
+          channelId,
+          outcome: botUser.kind,
+        });
+      }
+
       const moved = await options.discord.moveMemberToChannel({
         guildId: input.guildId,
         userId: input.memberId,
@@ -281,27 +304,6 @@ export function createCreationLifecycle(options: {
       await options.reservationService.complete(reservationId, channelId);
       options.metrics.increment("creationSuccesses");
       await refreshActiveGauge();
-
-      const botUser = await options.discord.getCurrentUser();
-      if (botUser.kind === "found") {
-        await installVoiceControlPanel({
-          discord: options.discord,
-          channels: options.channels,
-          logger: options.logger,
-          guildId: input.guildId,
-          channelId,
-          ownerId: input.memberId,
-          botUserId: botUser.value.id,
-          botUsername: botUser.value.username,
-          requestId: createReqId,
-        });
-      } else {
-        options.logger.warn("Voice panel skipped; bot user unavailable", {
-          guildId: input.guildId,
-          channelId,
-          outcome: botUser.kind,
-        });
-      }
 
       options.logger.info("Temporary channel created", {
         guildId: input.guildId,

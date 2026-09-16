@@ -15,7 +15,7 @@ import {
   VOICE_PANEL_VERSION,
 } from "../src/lib/j2c/voice-panel.ts";
 import { createVoicePanelInteractionHandler } from "../src/lib/j2c/voice-panel-interactions.ts";
-import { installVoiceControlPanel, refreshVoiceControlPanel } from "../src/lib/j2c/voice-panel-service.ts";
+import { installVoiceControlPanel, refreshVoiceControlPanel, resetVoicePanelLocksForTests } from "../src/lib/j2c/voice-panel-service.ts";
 import { createVoiceStateHandler } from "../src/lib/j2c/voice-state-handler.ts";
 import { createCreationLifecycle } from "../src/lib/j2c/creation-lifecycle.ts";
 import { createDeletionLifecycle } from "../src/lib/j2c/deletion-lifecycle.ts";
@@ -564,7 +564,68 @@ describe("creation installs panel", () => {
 });
 
 describe("voice panel refresh duplication", () => {
+  test("concurrent installs only send one panel message", async () => {
+    resetVoicePanelLocksForTests();
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "creating",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [],
+    });
+    const { discord, controls } = createFakeDiscord({
+      currentUser: { id: botId, username: "Pure" },
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+
+    await Promise.all([
+      installVoiceControlPanel({
+        discord,
+        channels,
+        logger: testLogger(),
+        guildId,
+        channelId,
+        ownerId,
+        botUserId: botId,
+        botUsername: "Pure",
+        requestId: "create-1",
+      }),
+      installVoiceControlPanel({
+        discord,
+        channels,
+        logger: testLogger(),
+        guildId,
+        channelId,
+        ownerId,
+        botUserId: botId,
+        botUsername: "Pure",
+        requestId: "repair-1",
+      }),
+    ]);
+
+    expect(controls.channelMessages).toHaveLength(1);
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.panelMessageId).toBe(controls.channelMessages[0]?.id);
+    expect(record?.panelOwnerId).toBe(ownerId);
+  });
+
   test("transient edit failure does not send a second panel", async () => {
+    resetVoicePanelLocksForTests();
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({
       guildId,
@@ -600,6 +661,7 @@ describe("voice panel refresh duplication", () => {
   });
 
   test("missing panel message is replaced once", async () => {
+    resetVoicePanelLocksForTests();
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({
       guildId,
@@ -628,6 +690,7 @@ describe("voice panel refresh duplication", () => {
       requestId: "refresh-2",
     });
 
+    expect(controls.editedChannelMessages).toHaveLength(1);
     expect(controls.channelMessages).toHaveLength(1);
     const record = await channels.findByChannelId(channelId);
     expect(record?.panelMessageId).toBe(controls.channelMessages[0]?.id);
