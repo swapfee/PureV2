@@ -52,13 +52,38 @@ export async function synchronizeJ2cIndexes(
   return results;
 }
 
+function isMissingNamespaceError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as { code?: unknown; codeName?: unknown; message?: unknown };
+  if (record.code === 26 || record.codeName === "NamespaceNotFound") return true;
+  return typeof record.message === "string" && /ns does not exist/i.test(record.message);
+}
+
+/** Exported for unit tests of fresh-database namespace handling. */
+export function isMissingMongoNamespaceError(error: unknown): boolean {
+  return isMissingNamespaceError(error);
+}
+
+/**
+ * List indexes for Join-to-Create models.
+ * Missing collections (fresh database) are treated as empty index lists so
+ * verification/plan can report creates instead of crashing.
+ */
 export async function listJ2cIndexes(
   models: readonly IndexableModel[] = defaultModels,
 ): Promise<readonly IndexListingResult[]> {
   const results: IndexListingResult[] = [];
   for (const model of models) {
-    const indexes = await model.listIndexes();
-    results.push({ modelName: model.modelName, indexes });
+    try {
+      const indexes = await model.listIndexes();
+      results.push({ modelName: model.modelName, indexes });
+    } catch (error: unknown) {
+      if (isMissingNamespaceError(error)) {
+        results.push({ modelName: model.modelName, indexes: [] });
+        continue;
+      }
+      throw error;
+    }
   }
   return results;
 }
