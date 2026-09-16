@@ -1,24 +1,43 @@
 import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
 
 import type { Logger } from "../logger.ts";
-import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
+import type { DiscordApiPort, InteractionCreatePayload, InteractionOption } from "../runtime-types.ts";
 import { DEFAULT_CHANNEL_NAME_TEMPLATE } from "../../models/snowflake.ts";
+import { runFactoryReset } from "./factory-reset.ts";
 import {
   DEFAULT_SETUP_CATEGORY_NAME,
   DEFAULT_SETUP_LOBBY_NAME,
   normalizeSetupChannelName,
 } from "./setup-channel-names.ts";
 import { GuildConfigValidationError, validateUpsertGuildConfigInput } from "./validation.ts";
-import type { GuildConfigRepository } from "./repositories.ts";
+import type {
+  CreationReservationRepository,
+  GuildConfigRepository,
+  TemporaryChannelRepository,
+} from "./repositories.ts";
+import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
 
 const MANAGE_GUILD = BitwisePermissionFlags.MANAGE_GUILD;
 const ADMINISTRATOR = BitwisePermissionFlags.ADMINISTRATOR;
 
 function optionValue(
-  options: readonly { name: string; value?: string | number | boolean }[] | undefined,
+  options: readonly InteractionOption[] | undefined,
   name: string,
 ): string | number | boolean | undefined {
   return options?.find((option) => option.name === name)?.value;
+}
+
+function resolveSubcommand(options: readonly InteractionOption[] | undefined): {
+  readonly name: "create" | "reset" | undefined;
+  readonly options: readonly InteractionOption[];
+} {
+  const root = options?.[0];
+  if (!root) return { name: undefined, options: [] };
+  if (root.name === "create" || root.name === "reset") {
+    return { name: root.name, options: root.options ?? [] };
+  }
+  // Backward-compatible flat options (treat as create).
+  return { name: "create", options: options ?? [] };
 }
 
 function hasManageGuild(permissions: string | undefined): boolean {
@@ -50,10 +69,13 @@ export interface SetupCommandService {
 
 export function createSetupCommandService(options: {
   readonly configs: GuildConfigRepository;
+  readonly channels: TemporaryChannelRepository;
+  readonly reservations: CreationReservationRepository;
+  readonly occupancy: VoiceOccupancyTracker;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
 }): SetupCommandService {
-  const { configs, discord, logger } = options;
+  const { configs, channels, reservations, occupancy, discord, logger } = options;
 
   return {
     async execute(interaction): Promise<void> {
@@ -84,30 +106,70 @@ export function createSetupCommandService(options: {
         return;
       }
 
+      const sub = resolveSubcommand(interaction.options);
+      if (sub.name !== "create" && sub.name !== "reset") {
+        await reply("Use `/setup create` or `/setup reset`.");
+        return;
+      }
+
       await discord.deferInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
         ephemeral: true,
       });
 
+      if (sub.name === "reset") {
+        const result = await runFactoryReset({
+          guildId: interaction.guildId,
+          interactionId: interaction.id,
+          configs,
+          channels,
+          reservations,
+          occupancy,
+          discord,
+          logger,
+        });
+
+        if ("kind" in result) {
+          await finish("Join-to-Create is not configured in this server.");
+          return;
+        }
+
+        await finish(
+          [
+            "Factory reset complete. Join-to-Create has been removed.",
+            `Deleted empty temporary channels: ${result.deletedTemporaryChannels}`,
+            `Kept occupied temporary channels: ${result.keptTemporaryChannels}`,
+            result.deletedLobby ? "Lobby deleted." : "Lobby could not be deleted (check bot permissions).",
+            result.deletedCategory
+              ? "Category deleted."
+              : result.keptCategory
+                ? `Category kept${result.renamedCategory ? ` and renamed to \`${DEFAULT_SETUP_CATEGORY_NAME}\`` : ""} because occupied temporary channels remain.`
+                : "Category status unknown.",
+            "Run `/setup create` to install Join-to-Create again.",
+          ].join("\n"),
+        );
+        return;
+      }
+
       const guildId = interaction.guildId;
       const categoryName = normalizeSetupChannelName(
-        typeof optionValue(interaction.options, "category_name") === "string"
-          ? String(optionValue(interaction.options, "category_name"))
+        typeof optionValue(sub.options, "category_name") === "string"
+          ? String(optionValue(sub.options, "category_name"))
           : undefined,
         DEFAULT_SETUP_CATEGORY_NAME,
       );
       const lobbyName = normalizeSetupChannelName(
-        typeof optionValue(interaction.options, "lobby_name") === "string"
-          ? String(optionValue(interaction.options, "lobby_name"))
+        typeof optionValue(sub.options, "lobby_name") === "string"
+          ? String(optionValue(sub.options, "lobby_name"))
           : undefined,
         DEFAULT_SETUP_LOBBY_NAME,
       );
 
-      const templateRaw = optionValue(interaction.options, "template");
-      const limitRaw = optionValue(interaction.options, "limit");
-      const enabledRaw = optionValue(interaction.options, "enabled");
-      const moderatorRaw = optionValue(interaction.options, "moderator_role");
+      const templateRaw = optionValue(sub.options, "template");
+      const limitRaw = optionValue(sub.options, "limit");
+      const enabledRaw = optionValue(sub.options, "enabled");
+      const moderatorRaw = optionValue(sub.options, "moderator_role");
 
       const setupReason = "PureV2 Join-to-Create setup";
       const categoryRequestId = `setup:${interaction.id}:category`;
@@ -208,7 +270,7 @@ export function createSetupCommandService(options: {
           guildId,
           error: error instanceof Error ? error.message : String(error),
         });
-        await finish("Created Discord channels but could not save settings. Try `/setup` again.");
+        await finish("Created Discord channels but could not save settings. Try `/setup create` again.");
       }
     },
   };

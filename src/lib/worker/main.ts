@@ -93,6 +93,9 @@ export async function runWorkerMain(): Promise<void> {
 
   const setup = createSetupCommandService({
     configs: configsRepo,
+    channels: channelsRepo,
+    reservations: reservationsRepo,
+    occupancy: j2c.occupancy,
     discord,
     logger: logger.child({ component: "setup" }),
   });

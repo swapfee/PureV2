@@ -5,6 +5,7 @@ import type { TemporaryChannelRecord, TemporaryChannelStatus } from "../../model
 export interface GuildConfigRepository {
   findByGuildId(guildId: string): Promise<GuildConfigRecord | undefined>;
   upsert(input: UpsertGuildConfigInput): Promise<GuildConfigRecord>;
+  deleteByGuildId(guildId: string): Promise<boolean>;
 }
 
 export interface CreateTemporaryChannelInput {
@@ -26,6 +27,7 @@ export interface TemporaryChannelRepository {
   findBlockingOwnedChannel(guildId: string, ownerId: string): Promise<TemporaryChannelRecord | undefined>;
   listByStatus(statuses: readonly TemporaryChannelStatus[]): Promise<readonly TemporaryChannelRecord[]>;
   listActiveByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
+  listByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
   countByStatus(status: TemporaryChannelStatus): Promise<number>;
   markActive(channelId: string, occupantIds: readonly string[]): Promise<TemporaryChannelRecord | undefined>;
   setOccupants(

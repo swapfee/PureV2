@@ -143,6 +143,10 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
       if (!doc) throw new Error("Failed to upsert guild config");
       return toGuildRecord(doc);
     },
+    async deleteByGuildId(guildId) {
+      const result = await GuildConfigModel.deleteOne({ guildId }).exec();
+      return result.deletedCount > 0;
+    },
   };
 }
 
@@ -198,6 +202,11 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
 
     async listActiveByGuild(guildId) {
       const docs = await TemporaryChannelModel.find({ guildId, status: "active" }).lean().exec();
+      return docs.map(toTempRecord);
+    },
+
+    async listByGuild(guildId) {
+      const docs = await TemporaryChannelModel.find({ guildId }).lean().exec();
       return docs.map(toTempRecord);
     },
 

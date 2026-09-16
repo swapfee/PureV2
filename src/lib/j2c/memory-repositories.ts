@@ -66,6 +66,9 @@ export function createMemoryGuildConfigRepository(): GuildConfigRepository {
       byGuild.set(record.guildId, record);
       return cloneGuild(record);
     },
+    async deleteByGuildId(guildId) {
+      return byGuild.delete(guildId);
+    },
   };
 }
 
@@ -151,6 +154,10 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       return [...byChannel.values()]
         .filter((record) => record.guildId === guildId && record.status === "active")
         .map(cloneTemp);
+    },
+
+    async listByGuild(guildId) {
+      return [...byChannel.values()].filter((record) => record.guildId === guildId).map(cloneTemp);
     },
 
     async countByStatus(status) {
