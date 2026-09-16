@@ -15,6 +15,9 @@ export interface CommandContext {
   readonly vc?: {
     execute(interaction: InteractionCreatePayload): Promise<void>;
   };
+  readonly setup?: {
+    execute(interaction: InteractionCreatePayload): Promise<void>;
+  };
 }
 
 export interface CommandModule {

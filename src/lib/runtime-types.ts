@@ -13,6 +13,7 @@ export interface InteractionCreatePayload {
   readonly guildId?: string;
   readonly channelId?: string;
   readonly userId: string;
+  readonly memberPermissions?: string;
   readonly commandName?: string;
   readonly options?: readonly InteractionOption[];
 }
@@ -55,6 +56,7 @@ export interface PermissionOverwrite {
 export interface DiscordChannelDetails {
   readonly id: string;
   readonly name?: string;
+  readonly type?: number;
   readonly userLimit?: number;
   readonly permissionOverwrites?: readonly PermissionOverwrite[];
 }

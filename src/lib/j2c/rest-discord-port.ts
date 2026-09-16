@@ -88,15 +88,17 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
 
     async getChannel(request) {
       try {
-        const channel = await rest.makeRequest<{ id: string | number | bigint; name?: string }>(
-          "GET",
-          rest.routes.channels.channel(request.channelId),
-        );
+        const channel = await rest.makeRequest<{
+          id: string | number | bigint;
+          name?: string;
+          type?: number;
+        }>("GET", rest.routes.channels.channel(request.channelId));
         return {
           kind: "found" as const,
           value: {
             id: String(channel.id),
             ...(channel.name === undefined ? {} : { name: channel.name }),
+            ...(channel.type === undefined ? {} : { type: channel.type }),
           },
         };
       } catch (error) {

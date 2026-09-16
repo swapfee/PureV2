@@ -145,14 +145,27 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       try {
         const channel = await bot.helpers.getChannel(request.channelId);
         const overwrites = readOverwrites(Reflect.get(channel, "permissionOverwrites"));
+        const typeRaw = Reflect.get(channel, "type");
+        const type =
+          typeof typeRaw === "number"
+            ? typeRaw
+            : typeof typeRaw === "bigint"
+              ? Number(typeRaw)
+              : undefined;
+        const userLimitRaw = Reflect.get(channel, "userLimit");
+        const userLimit =
+          typeof userLimitRaw === "number"
+            ? userLimitRaw
+            : typeof userLimitRaw === "bigint"
+              ? Number(userLimitRaw)
+              : undefined;
         return {
           kind: "found" as const,
           value: {
             id: String(channel.id),
             ...(channel.name === undefined ? {} : { name: channel.name }),
-            ...(Reflect.get(channel, "userLimit") === undefined
-              ? {}
-              : { userLimit: Number(Reflect.get(channel, "userLimit")) }),
+            ...(type === undefined ? {} : { type }),
+            ...(userLimit === undefined ? {} : { userLimit }),
             ...(overwrites === undefined ? {} : { permissionOverwrites: overwrites }),
           },
         };

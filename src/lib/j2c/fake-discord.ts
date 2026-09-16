@@ -9,6 +9,7 @@ import type {
 export interface FakeDiscordChannel {
   id: string;
   name: string;
+  type?: number;
   parentId?: string;
   userLimit?: number;
   guildId: string;
@@ -134,6 +135,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         value: {
           id: channel.id,
           name: channel.name,
+          ...(channel.type === undefined ? {} : { type: channel.type }),
           ...(channel.userLimit === undefined ? {} : { userLimit: channel.userLimit }),
           permissionOverwrites: [...channel.permissionOverwrites],
         },

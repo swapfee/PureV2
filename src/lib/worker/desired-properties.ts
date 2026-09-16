@@ -20,6 +20,7 @@ export const workerDesiredProperties = {
     id: true,
     user: true,
     guildId: true,
+    permissions: true,
   },
   channel: {
     id: true,

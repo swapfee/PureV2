@@ -47,7 +47,10 @@ export function createInteractionDispatcher(
   workerId: number,
   logger: Logger,
   discord: DiscordApiPort,
-  vc?: { execute(interaction: InteractionCreatePayload): Promise<void> },
+  services?: {
+    readonly vc?: { execute(interaction: InteractionCreatePayload): Promise<void> };
+    readonly setup?: { execute(interaction: InteractionCreatePayload): Promise<void> };
+  },
 ): InteractionDispatcher {
   return {
     async dispatch(interaction: InteractionCreatePayload): Promise<void> {
@@ -72,7 +75,16 @@ export function createInteractionDispatcher(
         }
       }
 
-      await command.execute({ workerId, logger, discord, ...(vc ? { vc } : {}) }, interaction);
+      await command.execute(
+        {
+          workerId,
+          logger,
+          discord,
+          ...(services?.vc ? { vc: services.vc } : {}),
+          ...(services?.setup ? { setup: services.setup } : {}),
+        },
+        interaction,
+      );
     },
   };
 }
@@ -107,6 +119,14 @@ export function wireBotEvents(
       mapInteractionOption(option),
     );
 
+    const memberPermissionsRaw = Reflect.get(interaction.member ?? {}, "permissions");
+    const memberPermissions =
+      typeof memberPermissionsRaw === "bigint" ||
+      typeof memberPermissionsRaw === "number" ||
+      typeof memberPermissionsRaw === "string"
+        ? String(memberPermissionsRaw)
+        : undefined;
+
     const payload: InteractionCreatePayload = {
       id: interaction.id.toString(),
       token: interaction.token,
@@ -117,6 +137,7 @@ export function wireBotEvents(
       ...(interaction.channelId === undefined ? {} : { channelId: interaction.channelId.toString() }),
       ...(interaction.data?.name === undefined ? {} : { commandName: interaction.data.name }),
       ...(options === undefined ? {} : { options }),
+      ...(memberPermissions === undefined ? {} : { memberPermissions }),
     };
 
     await event.execute(context, payload);

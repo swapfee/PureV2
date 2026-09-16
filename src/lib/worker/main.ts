@@ -19,6 +19,7 @@ import {
 } from "../j2c/memory-repositories.ts";
 import { createJ2cRuntime } from "../j2c/runtime.ts";
 import { createVcCommandService } from "../j2c/vc-command-service.ts";
+import { createSetupCommandService } from "../j2c/setup-command-service.ts";
 import { createVcMetrics } from "../j2c/vc-metrics.ts";
 import type { GatewayEventMessage, IpcMessage } from "../ipc/messages.ts";
 import { parseIpcMessage } from "../ipc/messages.ts";
@@ -90,13 +91,19 @@ export async function runWorkerMain(): Promise<void> {
     cooldowns: createCooldownStore({ maxEntries: 5_000 }),
   });
 
+  const setup = createSetupCommandService({
+    configs: configsRepo,
+    discord,
+    logger: logger.child({ component: "setup" }),
+  });
+
   const dispatcher = createInteractionDispatcher(
     commands,
     cooldowns,
     config.BOT_WORKER_ID,
     logger,
     discord,
-    vc,
+    { vc, setup },
   );
 
   const context: EventContext = {
