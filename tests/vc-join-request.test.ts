@@ -2,15 +2,26 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { BitwisePermissionFlags } from "discordeno";
 
 import { createCooldownStore } from "../src/handlers/cooldowns.ts";
+import { createDeletionLifecycle, EMPTY_CHANNEL_DELAY_MS } from "../src/lib/j2c/deletion-lifecycle.ts";
 import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
+import { createJ2cMetrics } from "../src/lib/j2c/metrics.ts";
 import { createMemoryTemporaryChannelRepository } from "../src/lib/j2c/memory-repositories.ts";
+import { createManualTimerScheduler } from "../src/lib/j2c/time.ts";
 import { createVcCommandService } from "../src/lib/j2c/vc-command-service.ts";
 import {
   buildJoinRequestCustomId,
+  buildJoinRequestKey,
+  cancelPendingJoinRequestsForChannel,
+  finalizeJoinRequestMessage,
+  formatJoinRequestResolvedMessage,
+  hasPendingJoinRequest,
+  registerPendingJoinRequest,
   resetJoinRequestStoreForTests,
   VC_JOIN_REQUEST_PREFIX,
+  VC_JOIN_REQUEST_TTL_MS,
 } from "../src/lib/j2c/vc-join-request.ts";
 import { createVcMetrics } from "../src/lib/j2c/vc-metrics.ts";
+import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
 import { createVoicePanelInteractionHandler } from "../src/lib/j2c/voice-panel-interactions.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
@@ -352,5 +363,180 @@ describe("/vc request join flow", () => {
     expect(JSON.stringify(controls.editedChannelMessages.at(-1)?.components)).toContain(
       '"disabled":true',
     );
+  });
+
+  test("cancelPendingJoinRequestsForChannel clears store and disables buttons", async () => {
+    const { discord, controls } = createFakeDiscord();
+    const messageId = "800000000000000010";
+    const expiresAt = Date.now() + VC_JOIN_REQUEST_TTL_MS;
+    registerPendingJoinRequest(
+      {
+        requestKey: buildJoinRequestKey("cancel-unit"),
+        guildId,
+        channelId,
+        ownerId,
+        requesterId,
+        messageId,
+        expiresAt,
+      },
+      async () => undefined,
+    );
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(true);
+
+    await cancelPendingJoinRequestsForChannel({
+      discord,
+      channelId,
+      requestId: "test-cancel",
+    });
+
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
+    const edited = controls.editedChannelMessages.at(-1);
+    expect(edited?.messageId).toBe(messageId);
+    expect(edited?.content).toBe(
+      formatJoinRequestResolvedMessage({
+        requesterId,
+        ownerId,
+        outcome: "cancelled",
+      }),
+    );
+    expect(JSON.stringify(edited?.components)).toContain('"disabled":true');
+  });
+
+  test("cancel treats missing message edits as success", async () => {
+    const { discord, controls } = createFakeDiscord();
+    controls.failNextEditMessage = { kind: "missing" };
+    registerPendingJoinRequest(
+      {
+        requestKey: buildJoinRequestKey("cancel-missing"),
+        guildId,
+        channelId,
+        ownerId,
+        requesterId,
+        messageId: "800000000000000011",
+        expiresAt: Date.now() + VC_JOIN_REQUEST_TTL_MS,
+      },
+      async () => undefined,
+    );
+
+    await cancelPendingJoinRequestsForChannel({
+      discord,
+      channelId,
+      requestId: "test-cancel-missing",
+    });
+
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
+    expect(controls.editedChannelMessages).toHaveLength(1);
+  });
+
+  test("/vc delete cancels pending join requests", async () => {
+    const { vc, controls, channels } = await setup(true);
+    await vc.execute(
+      interaction({
+        id: "req-before-delete",
+        guildId,
+        userId: requesterId,
+        options: [
+          {
+            name: "request",
+            type: 1,
+            options: [{ name: "target", type: 3, value: channelId }],
+          },
+        ],
+      }),
+    );
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(true);
+    const messageId = controls.channelMessages[0]!.id;
+
+    await vc.execute(
+      interaction({
+        id: "delete-with-pending",
+        guildId,
+        userId: ownerId,
+        options: [{ name: "delete", type: 1 }],
+      }),
+    );
+
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
+    const cancelled = controls.editedChannelMessages.find((entry) => entry.messageId === messageId);
+    expect(cancelled?.content).toMatch(/cancelled/i);
+    expect(JSON.stringify(cancelled?.components)).toContain('"disabled":true');
+  });
+
+  test("empty-channel deletion cancels pending join requests", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-empty",
+      creationRequestId: "req-empty",
+      occupantIds: [],
+    });
+    const { discord, controls } = createFakeDiscord();
+    controls.channels.set(channelId, {
+      id: channelId,
+      name: "empty-room",
+      guildId,
+      userLimit: 0,
+      permissionOverwrites: [],
+    });
+    const messageId = "800000000000000012";
+    registerPendingJoinRequest(
+      {
+        requestKey: buildJoinRequestKey("empty-delete"),
+        guildId,
+        channelId,
+        ownerId,
+        requesterId,
+        messageId,
+        expiresAt: Date.now() + VC_JOIN_REQUEST_TTL_MS,
+      },
+      async () => undefined,
+    );
+
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, []);
+    occupancy.markReady();
+    const timers = createManualTimerScheduler();
+    const deletion = createDeletionLifecycle({
+      channels,
+      discord,
+      metrics: createJ2cMetrics(),
+      logger: createLogger({
+        service: "purev2",
+        role: "test",
+        level: "error",
+        write: () => undefined,
+      }),
+      occupancy,
+      clock: { now: () => new Date(timers.nowMs()) },
+      timers,
+    });
+
+    await deletion.onOccupantsChanged(channelId, []);
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
+    expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
+    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/cancelled/i);
+  });
+
+  test("finalizeJoinRequestMessage cancelled copy stays professional", async () => {
+    const { discord, controls } = createFakeDiscord();
+    await finalizeJoinRequestMessage({
+      discord,
+      channelId,
+      messageId: "800000000000000013",
+      requesterId,
+      ownerId,
+      expiresAt: Date.now() + VC_JOIN_REQUEST_TTL_MS,
+      outcome: "cancelled",
+      requestId: "finalize-cancelled",
+    });
+    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/Join request cancelled/i);
+    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/channel was deleted/i);
   });
 });
