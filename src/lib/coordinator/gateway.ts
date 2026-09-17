@@ -90,6 +90,12 @@ export function createCoordinatorGateway(options: CoordinatorGatewayOptions): Co
         token: options.token,
         intents: COORDINATOR_INTENTS,
         connection,
+        // Same trick as discord.js: only `browser` controls the mobile indicator.
+        properties: {
+          os: process.platform,
+          browser: "Discord iOS",
+          device: "Discordeno",
+        },
         // Keep shards in this process; workers only process events.
         totalWorkers: 1,
         shardsPerWorker: connection.shards,
