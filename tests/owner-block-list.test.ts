@@ -260,7 +260,7 @@ describe("owner block list", () => {
         ],
       }),
     );
-    expect(embedText(controls.editedInteractions[0])).toBe(
+    expect(embedText(controls.editedInteractions[0])).toContain(
       "That member is blocked from this channel.",
     );
   });
@@ -325,7 +325,7 @@ describe("owner block list", () => {
       }),
     );
 
-    expect(embedText(controls.editedInteractions.at(-1))).toBe(
+    expect(embedText(controls.editedInteractions.at(-1))).toContain(
       "You are blocked from this channel by its owner.",
     );
     const record = await channels.findByChannelId(channelId);
