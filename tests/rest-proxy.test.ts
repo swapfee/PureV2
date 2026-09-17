@@ -104,4 +104,46 @@ describe("coordinator REST proxy", () => {
       await rest.stop();
     }
   });
+
+  test("treats upstream 404 as expected and does not count it as a proxy error", async () => {
+    const metrics = createCoordinatorMetrics();
+    const errorLogs: string[] = [];
+    const rest = createCoordinatorRest({
+      token: testToken,
+      applicationId: "123456789012345678",
+      host: "127.0.0.1",
+      port: 0,
+      authorization: "0123456789abcdef",
+      bodyLimitBytes: 1_048_576,
+      requestCacheLimit: 100,
+      requestCacheTtlMs: 60_000,
+      logger: createLogger({
+        service: "purev2-test",
+        role: "test",
+        level: "debug",
+        write: (line) => {
+          if (line.includes('"level":"error"')) errorLogs.push(line);
+        },
+      }),
+      metrics,
+      executeRequest: async () => {
+        const error = new Error("Failed to send request to discord.") as Error & { status: number };
+        error.status = 404;
+        throw error;
+      },
+    });
+
+    await rest.start();
+    try {
+      const response = await fetch(
+        `${rest.baseUrl}/v10/guilds/1/voice-states/2`,
+        { headers: { authorization: "0123456789abcdef" } },
+      );
+      expect(response.status).toBe(404);
+      expect(metrics.snapshot().restProxyErrors).toBe(0);
+      expect(errorLogs).toHaveLength(0);
+    } finally {
+      await rest.stop();
+    }
+  });
 });

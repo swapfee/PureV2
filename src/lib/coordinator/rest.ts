@@ -204,18 +204,30 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
               if (requestId) inFlight.delete(requestId);
             }
           } catch (error) {
-            options.metrics.increment("restProxyErrors");
-            options.logger.error("REST proxy request failed", {
-              method,
-              route,
-              requestId,
-              status: readErrorStatus(error),
-              error,
-            });
+            const status = readErrorStatus(error);
+            // Discord returns 404 for lookups that miss (e.g. GET voice-state when
+            // the member is not connected). That is expected application traffic.
+            if (status === 404) {
+              options.logger.debug("REST proxy upstream not found", {
+                method,
+                route,
+                requestId,
+                status,
+              });
+            } else {
+              options.metrics.increment("restProxyErrors");
+              options.logger.error("REST proxy request failed", {
+                method,
+                route,
+                requestId,
+                status,
+                error,
+              });
+            }
             return structuredError(
               "proxy_request_failed",
               error instanceof Error ? error.message : "unknown_error",
-              readErrorStatus(error),
+              status,
             );
           }
         },
