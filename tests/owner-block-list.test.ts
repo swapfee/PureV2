@@ -232,7 +232,9 @@ describe("owner block list", () => {
         ],
       }),
     );
-    expect(embedText(controls.editedInteractions[0])).toMatch(/unblock/i);
+    expect(embedText(controls.editedInteractions[0])).toMatch(
+      /on your block list.*\/vc unblock before permitting/i,
+    );
   });
 
   test("/vc invite refuses blocked members", async () => {
@@ -258,7 +260,9 @@ describe("owner block list", () => {
         ],
       }),
     );
-    expect(embedText(controls.editedInteractions[0])).toMatch(/blocked/i);
+    expect(embedText(controls.editedInteractions[0])).toBe(
+      "That member is blocked from this channel.",
+    );
   });
 
   test("/vc block and unblock via slash + targetUserId fallback", async () => {
@@ -321,7 +325,9 @@ describe("owner block list", () => {
       }),
     );
 
-    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/blocked/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toBe(
+      "You are blocked from this channel by its owner.",
+    );
     const record = await channels.findByChannelId(channelId);
     expect(record?.ownerId).toBe(ownerId);
   });

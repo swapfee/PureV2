@@ -465,7 +465,7 @@ export function createVcCommandService(options: {
               await reply(
                 interaction,
                 deferred,
-                failureResponse("You are blocked by that channel's owner."),
+                failureResponse("You are blocked from this channel by its owner."),
               );
               return;
             }
@@ -735,7 +735,7 @@ export function createVcCommandService(options: {
               await reply(
                 interaction,
                 deferred,
-                failureResponse("That member is blocked by this channel's owner."),
+                failureResponse("That member is blocked from this channel."),
               );
               return;
             }
@@ -1261,7 +1261,9 @@ export function createVcCommandService(options: {
               await reply(
                 interaction,
                 deferred,
-                failureResponse(`Remove <@${targetUserId}> with /vc unblock before permitting them.`),
+                failureResponse(
+                  "That member is on your block list. Use /vc unblock before permitting them.",
+                ),
               );
               return;
             }

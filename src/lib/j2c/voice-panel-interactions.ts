@@ -527,7 +527,7 @@ async function handlePanelButton(input: {
           input.discord,
           input.interaction,
           input.replyState,
-          failureResponse("You cannot claim this channel because the owner has blocked you."),
+          failureResponse("You are blocked from this channel by its owner."),
         );
         return;
       }
@@ -998,7 +998,7 @@ async function handleJoinRequestButton(input: {
         input.interaction,
         input.replyState,
         failureResponse(
-          "That member is on your block list. Remove them with /vc unblock before approving.",
+          "That member is on your block list. Use /vc unblock before approving.",
         ),
       );
       return;
