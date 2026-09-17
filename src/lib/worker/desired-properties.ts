@@ -10,6 +10,10 @@ export const workerDesiredProperties = {
     data: true,
     user: true,
     member: true,
+    message: true,
+  },
+  message: {
+    id: true,
   },
   user: {
     id: true,

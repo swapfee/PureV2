@@ -894,4 +894,5 @@ describe("/vc command family", () => {
     expect(lines.some((line) => line.includes(channelId))).toBe(true);
     expect(lines.some((line) => line.includes("vc:lock:lock-log"))).toBe(true);
   });
+
 });

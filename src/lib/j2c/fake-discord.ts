@@ -67,12 +67,14 @@ export interface FakeDiscordControls {
   readonly channelMessages: {
     channelId: string;
     id: string;
+    content?: string;
     components?: readonly unknown[];
     flags?: number;
   }[];
   readonly editedChannelMessages: {
     channelId: string;
     messageId: string;
+    content?: string;
     components?: readonly unknown[];
     flags?: number;
   }[];
@@ -447,6 +449,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       controls.channelMessages.push({
         channelId: request.channelId,
         id,
+        ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.components === undefined ? {} : { components: request.components }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
       });
@@ -457,6 +460,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       controls.editedChannelMessages.push({
         channelId: request.channelId,
         messageId: request.messageId,
+        ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.components === undefined ? {} : { components: request.components }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
       });

@@ -199,6 +199,17 @@ export function wireBotEvents(
       typeof targetIdRaw === "bigint" || typeof targetIdRaw === "number" || typeof targetIdRaw === "string"
         ? String(targetIdRaw)
         : undefined;
+    const messageRaw = Reflect.get(interaction, "message");
+    const messageIdRaw =
+      typeof messageRaw === "object" && messageRaw !== null
+        ? Reflect.get(messageRaw, "id")
+        : undefined;
+    const messageId =
+      typeof messageIdRaw === "bigint" ||
+      typeof messageIdRaw === "number" ||
+      typeof messageIdRaw === "string"
+        ? String(messageIdRaw)
+        : undefined;
 
     const payload: InteractionCreatePayload = {
       id: interaction.id.toString(),
@@ -215,6 +226,7 @@ export function wireBotEvents(
       ...(componentValues === undefined ? {} : { componentValues }),
       ...(selectedUserIds === undefined ? {} : { selectedUserIds }),
       ...(targetUserId === undefined ? {} : { targetUserId }),
+      ...(messageId === undefined ? {} : { messageId }),
     };
 
     await event.execute(context, payload);

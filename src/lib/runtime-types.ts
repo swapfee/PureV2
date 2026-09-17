@@ -23,6 +23,8 @@ export interface InteractionCreatePayload {
   readonly selectedUserIds?: readonly string[];
   /** Target user for user-context-menu commands. */
   readonly targetUserId?: string;
+  /** Message id for component interactions (button/select on a channel message). */
+  readonly messageId?: string;
 }
 
 export interface VoiceStateUpdatePayload {
@@ -261,6 +263,7 @@ export interface DiscordApiPort {
     readonly channelId: string;
     readonly messageId: string;
     readonly requestId: string;
+    readonly content?: string;
     readonly components?: readonly unknown[];
     readonly flags?: number;
   }): Promise<DiscordOperationResult>;

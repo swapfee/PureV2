@@ -513,6 +513,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           bot.rest.routes.channels.message(request.channelId, request.messageId),
           {
             body: {
+              ...(request.content === undefined ? {} : { content: request.content }),
               ...(request.components === undefined ? {} : { components: request.components }),
               ...(request.flags === undefined ? {} : { flags: request.flags }),
             },

@@ -32,6 +32,15 @@ import {
   buildBlockListComponents,
   formatBlockListPage,
 } from "./block-list-actions.ts";
+import {
+  approveJoinRequest,
+  buildJoinRequestComponents,
+  consumePendingJoinRequest,
+  finalizeJoinRequestMessage,
+  formatJoinRequestResolvedMessage,
+  parseJoinRequestCustomId,
+  VC_JOIN_REQUEST_PREFIX,
+} from "./vc-join-request.ts";
 
 const OWNER_ACTIONS = new Set<VoicePanelAction>([
   "lock",
@@ -165,7 +174,8 @@ export function createVoicePanelInteractionHandler(options: {
         customId.startsWith(`${VOICE_MODAL_PREFIX}:`) ||
         customId.startsWith(`${VOICE_SELECT_PREFIX}:`) ||
         customId.startsWith(`${VOICE_DELETE_PREFIX}:`) ||
-        customId.startsWith(`${BLOCK_LIST_BUTTON_PREFIX}:`)
+        customId.startsWith(`${BLOCK_LIST_BUTTON_PREFIX}:`) ||
+        customId.startsWith(`${VC_JOIN_REQUEST_PREFIX}:`)
       );
     },
 
@@ -176,6 +186,18 @@ export function createVoicePanelInteractionHandler(options: {
       const replyState: InteractionReplyState = { deferred: false, answered: false };
 
       try {
+        if (parts[0] === VC_JOIN_REQUEST_PREFIX) {
+          await handleJoinRequestButton({
+            interaction,
+            customId,
+            channels,
+            ...(blocks ? { blocks } : {}),
+            discord,
+            logger,
+            replyState,
+          });
+          return;
+        }
         if (parts[0] === BLOCK_LIST_BUTTON_PREFIX) {
           await handleBlockListPage({
             interaction,
@@ -918,6 +940,175 @@ async function handleBlockListPage(input: {
         page: page.page,
         hasPrev: page.hasPrev,
         hasNext: page.hasNext,
+      }),
+    ],
+  });
+  input.replyState.answered = true;
+}
+
+async function handleJoinRequestButton(input: {
+  readonly interaction: InteractionCreatePayload;
+  readonly customId: string;
+  readonly channels: TemporaryChannelRepository;
+  readonly blocks?: OwnerBlockListRepository;
+  readonly discord: DiscordApiPort;
+  readonly logger: Logger;
+  readonly replyState: InteractionReplyState;
+}): Promise<void> {
+  const parsed = parseJoinRequestCustomId(input.customId);
+  if (!parsed) return;
+
+  if (!input.interaction.guildId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse("This command can only be used in a server."),
+    );
+    return;
+  }
+
+  const record = await input.channels.findByChannelId(parsed.channelId);
+  if (!record || record.status !== "active" || record.guildId !== input.interaction.guildId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse("That temporary channel is no longer available."),
+    );
+    return;
+  }
+
+  if (record.ownerId !== input.interaction.userId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse("Only the channel owner can respond to this request."),
+    );
+    return;
+  }
+
+  if (parsed.decision === "approve" && parsed.expiresAt > Date.now() && input.blocks) {
+    const blocked = await input.blocks.getBlockedUserIds(record.guildId, record.ownerId);
+    if (blocked.includes(parsed.requesterId)) {
+      await replyEphemeral(
+        input.discord,
+        input.interaction,
+        input.replyState,
+        failureResponse(
+          "That member is on your block list. Remove them with /vc unblock before approving.",
+        ),
+      );
+      return;
+    }
+  }
+
+  // Cancel expiry timer before acknowledging the click.
+  const pending = consumePendingJoinRequest({
+    channelId: parsed.channelId,
+    requesterId: parsed.requesterId,
+  });
+  const messageId = input.interaction.messageId ?? pending?.messageId;
+  const requestId = `vc-req:${parsed.decision}:${input.interaction.id}`;
+
+  await deferUpdate(input.discord, input.interaction, input.replyState);
+
+  const publishResolved = async (outcome: "approved" | "declined" | "expired"): Promise<void> => {
+    const content = formatJoinRequestResolvedMessage({
+      requesterId: parsed.requesterId,
+      ownerId: record.ownerId,
+      outcome,
+    });
+    const components = [
+      ...buildJoinRequestComponents({
+        channelId: parsed.channelId,
+        requesterId: parsed.requesterId,
+        expiresAt: parsed.expiresAt,
+        disabled: true,
+      }),
+    ];
+
+    if (messageId) {
+      await finalizeJoinRequestMessage({
+        discord: input.discord,
+        channelId: parsed.channelId,
+        messageId,
+        requesterId: parsed.requesterId,
+        ownerId: record.ownerId,
+        expiresAt: parsed.expiresAt,
+        outcome,
+        requestId: `${requestId}:message`,
+      });
+    }
+
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      content,
+      components,
+    });
+    input.replyState.answered = true;
+  };
+
+  if (parsed.expiresAt <= Date.now()) {
+    await publishResolved("expired");
+    return;
+  }
+
+  if (parsed.decision === "decline") {
+    await publishResolved("declined");
+    return;
+  }
+
+  const channel = await input.discord.getChannel({ channelId: parsed.channelId });
+  if (channel.kind !== "found") {
+    input.logger.warn("Join request approve failed to load channel", {
+      channelId: parsed.channelId,
+      outcome: channel.kind,
+      interactionId: input.interaction.id,
+    });
+    await publishResolved("declined");
+    return;
+  }
+
+  const result = await approveJoinRequest({
+    discord: input.discord,
+    channels: input.channels,
+    ...(input.blocks ? { blocks: input.blocks } : {}),
+    logger: input.logger,
+    record,
+    channel: channel.value,
+    requesterId: parsed.requesterId,
+    requestId: `${requestId}:permit`,
+  });
+
+  if (result.kind === "blocked") {
+    await publishResolved("declined");
+    return;
+  }
+
+  if (result.kind === "already_permitted" || result.kind === "ok") {
+    await publishResolved("approved");
+    return;
+  }
+
+  input.logger.warn("Join request approve failed", {
+    channelId: parsed.channelId,
+    requesterId: parsed.requesterId,
+    outcome: result.kind,
+    interactionId: input.interaction.id,
+  });
+  await input.discord.editInteractionResponse({
+    applicationId: input.interaction.applicationId,
+    interactionToken: input.interaction.token,
+    embeds: failureResponse("Unable to approve that join request.").embeds,
+    components: [
+      ...buildJoinRequestComponents({
+        channelId: parsed.channelId,
+        requesterId: parsed.requesterId,
+        expiresAt: parsed.expiresAt,
+        disabled: true,
       }),
     ],
   });

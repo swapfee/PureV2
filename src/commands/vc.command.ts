@@ -186,6 +186,21 @@ const vcCommandData: CreateApplicationCommand = {
     },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
+      name: "request",
+      description: "Request access to a locked temporary voice channel",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "target",
+          description: "Voice channel ID or channel owner ID",
+          required: true,
+          minLength: 17,
+          maxLength: 20,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
       name: "info",
       description: "Show details about this temporary channel",
     },

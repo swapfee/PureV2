@@ -1,6 +1,7 @@
 /** Bounded-cardinality metrics for /vc management commands. */
 export type VcSubcommand =
   | "invite"
+  | "request"
   | "rename"
   | "limit"
   | "bitrate"
@@ -46,6 +47,7 @@ export interface VcMetrics {
 function emptySubcounts(): Record<VcSubcommand, number> {
   return {
     invite: 0,
+    request: 0,
     rename: 0,
     limit: 0,
     bitrate: 0,

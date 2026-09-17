@@ -41,9 +41,22 @@ import {
   VOICE_REGION_AUTOMATIC,
   VOICE_STATUS_MAX_LENGTH,
 } from "./voice-channel-settings.ts";
+import {
+  buildJoinRequestComponents,
+  buildJoinRequestKey,
+  channelIsLockedForJoinRequests,
+  finalizeJoinRequestMessage,
+  formatJoinRequestMessage,
+  hasPendingJoinRequest,
+  registerPendingJoinRequest,
+  resolveManagedChannelTarget,
+  VC_JOIN_REQUEST_TTL_MS,
+} from "./vc-join-request.ts";
+import { isSnowflake } from "../../models/snowflake.ts";
 
 export const VC_COOLDOWNS_MS = {
   invite: 3_000,
+  request: 10_000,
   rename: 15_000,
   limit: 3_000,
   bitrate: 3_000,
@@ -90,6 +103,9 @@ const MEMBER_SUBCOMMANDS = new Set<VcSubcommand>(["invite", "info"]);
 /** Guild-scoped personal list commands — no temporary channel required. */
 const PERSONAL_SUBCOMMANDS = new Set<VcSubcommand>(["block", "unblock", "block-list"]);
 
+/** Guild-scoped join requests — target a locked managed channel by id/owner. */
+const REQUEST_SUBCOMMANDS = new Set<VcSubcommand>(["request"]);
+
 function normalizeChannelName(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
   if (trimmed.length < 1 || trimmed.length > 100) return undefined;
@@ -99,6 +115,7 @@ function normalizeChannelName(raw: string): string | undefined {
 function isVcSubcommand(value: string): value is VcSubcommand {
   switch (value) {
     case "invite":
+    case "request":
     case "rename":
     case "limit":
     case "bitrate":
@@ -351,6 +368,239 @@ export function createVcCommandService(options: {
             guildId,
             userId: interaction.userId,
             subcommand,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await reply(
+            interaction,
+            deferred,
+            failureResponse("An unexpected error occurred. Please try again."),
+          );
+        }
+        return;
+      }
+
+      if (REQUEST_SUBCOMMANDS.has(subcommand)) {
+        if (!interaction.guildId) {
+          options.metrics.authorizationFailure();
+          await reply(
+            interaction,
+            deferred,
+            failureResponse("This command can only be used in a server."),
+          );
+          return;
+        }
+        const guildId = interaction.guildId;
+        const cooldownKey = `vc:${subcommand}:${guildId}:${interaction.userId}`;
+        const remainingMs = options.cooldowns.remaining(cooldownKey);
+        if (remainingMs > 0) {
+          options.metrics.cooldownRejection();
+          await reply(
+            interaction,
+            deferred,
+            failureResponse(
+              `This command is on cooldown. Please wait ${Math.ceil(remainingMs / 1000)}s.`,
+            ),
+          );
+          return;
+        }
+
+        const requestId = `vc:${subcommand}:${interaction.id}`;
+        const baseLog = {
+          guildId,
+          userId: interaction.userId,
+          interactionId: interaction.id,
+          requestId,
+          operation: subcommand,
+        };
+
+        try {
+          const rawTarget = optionValue(sub.options, "target");
+          if (typeof rawTarget !== "string" || !isSnowflake(rawTarget.trim())) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("Specify a valid voice channel ID or channel owner ID."),
+            );
+            return;
+          }
+          const target = rawTarget.trim();
+          const record = await resolveManagedChannelTarget({
+            guildId,
+            target,
+            channels: options.channels,
+          });
+          if (!record) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("No managed temporary voice channel matched that target."),
+            );
+            return;
+          }
+          if (record.ownerId === interaction.userId) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("You already own that channel."),
+            );
+            return;
+          }
+          if (record.rejectedUserIds.includes(interaction.userId)) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("You are rejected from that channel."),
+            );
+            return;
+          }
+          if (options.blocks) {
+            const blocked = await options.blocks.getBlockedUserIds(guildId, record.ownerId);
+            if (blocked.includes(interaction.userId)) {
+              options.metrics.validationFailure();
+              await reply(
+                interaction,
+                deferred,
+                failureResponse("You are blocked by that channel's owner."),
+              );
+              return;
+            }
+          }
+
+          const channel = await options.discord.getChannel({ channelId: record.channelId });
+          if (channel.kind !== "found") {
+            options.metrics.restFailure();
+            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            return;
+          }
+          if (!channelIsLockedForJoinRequests(record, channel.value)) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("That channel is not locked."),
+            );
+            return;
+          }
+          if (
+            memberAlreadyPermitted(
+              channel.value.permissionOverwrites,
+              interaction.userId,
+              record.rejectedUserIds,
+            )
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("You already have access to that channel."),
+            );
+            return;
+          }
+
+          const voice = await options.discord.getUserVoiceChannel({
+            guildId,
+            userId: interaction.userId,
+          });
+          if (voice.kind === "found" && voice.value.channelId === record.channelId) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("You are already connected to that channel."),
+            );
+            return;
+          }
+
+          if (hasPendingJoinRequest(record.channelId, interaction.userId)) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("You already have a pending join request for that channel."),
+            );
+            return;
+          }
+
+          const expiresAt = Date.now() + VC_JOIN_REQUEST_TTL_MS;
+          const sent = await options.discord.sendChannelMessage({
+            channelId: record.channelId,
+            requestId: `${requestId}:message`,
+            content: formatJoinRequestMessage({
+              requesterId: interaction.userId,
+              ownerId: record.ownerId,
+              seconds: Math.round(VC_JOIN_REQUEST_TTL_MS / 1000),
+            }),
+            components: [
+              ...buildJoinRequestComponents({
+                channelId: record.channelId,
+                requesterId: interaction.userId,
+                expiresAt,
+              }),
+            ],
+          });
+          if (sent.kind !== "found") {
+            options.metrics.restFailure();
+            options.logger.warn("VC join request message failed", {
+              ...baseLog,
+              channelId: record.channelId,
+              outcome: sent.kind,
+            });
+            await reply(
+              interaction,
+              deferred,
+              failureResponse("Unable to post the join request in that channel."),
+            );
+            return;
+          }
+
+          const requestKey = buildJoinRequestKey(interaction.id);
+          registerPendingJoinRequest(
+            {
+              requestKey,
+              guildId,
+              channelId: record.channelId,
+              ownerId: record.ownerId,
+              requesterId: interaction.userId,
+              messageId: sent.value.id,
+              expiresAt,
+            },
+            async (pending) => {
+              await finalizeJoinRequestMessage({
+                discord: options.discord,
+                channelId: pending.channelId,
+                messageId: pending.messageId,
+                requesterId: pending.requesterId,
+                ownerId: pending.ownerId,
+                expiresAt: pending.expiresAt,
+                outcome: "expired",
+                requestId: `${pending.requestKey}:expire`,
+              });
+            },
+          );
+
+          options.cooldowns.touch(cooldownKey, VC_COOLDOWNS_MS.request);
+          options.metrics.success("request");
+          options.logger.info("VC request succeeded", {
+            ...baseLog,
+            channelId: record.channelId,
+            ownerId: record.ownerId,
+            outcome: "ok",
+          });
+          await reply(
+            interaction,
+            deferred,
+            successResponse(
+              `Join request sent to <#${record.channelId}>. The owner has 60 seconds to respond.`,
+            ),
+          );
+        } catch (error: unknown) {
+          options.metrics.restFailure();
+          options.logger.error("VC request command failed", {
+            ...baseLog,
             error: error instanceof Error ? error.message : String(error),
           });
           await reply(
