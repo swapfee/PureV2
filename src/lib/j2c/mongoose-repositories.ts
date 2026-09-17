@@ -147,7 +147,7 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
             };
       const doc = await GuildConfigModel.findOneAndUpdate({ guildId: validated.guildId }, update, {
         upsert: true,
-        new: true,
+        returnDocument: 'after',
         setDefaultsOnInsert: true,
       })
         .lean()
@@ -232,7 +232,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId },
         { $set: { status: "active", occupantIds: [...occupantIds] }, $unset: { emptySince: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -245,7 +245,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         emptySince
           ? { $set: { occupantIds: [...occupantIds], emptySince } }
           : { $set: { occupantIds: [...occupantIds] }, $unset: { emptySince: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -262,7 +262,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
             deletionAttemptedAt: attemptedAt,
           },
         },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -273,7 +273,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId },
         { $set: { status: "stale", lastError } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -284,7 +284,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
         { $set: { locked } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -295,7 +295,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
         { $addToSet: { rejectedUserIds: userId } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -306,7 +306,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
         { $pull: { rejectedUserIds: userId } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -328,7 +328,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
         { $set: { ownerId: newOwnerId }, $unset: { ownerAbsentSince: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -341,7 +341,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         ownerAbsentSince
           ? { $set: { ownerAbsentSince } }
           : { $unset: { ownerAbsentSince: 1 } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -352,7 +352,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId },
         { $set: { panelMessageId, panelVersion, panelOwnerId } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -445,7 +445,7 @@ export function createMongooseCreationReservationRepository(): CreationReservati
       const doc = await CreationReservationModel.findOneAndUpdate(
         { reservationId },
         { $set: { status: "completed", channelId } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
@@ -456,7 +456,7 @@ export function createMongooseCreationReservationRepository(): CreationReservati
       const doc = await CreationReservationModel.findOneAndUpdate(
         { reservationId },
         { $set: { status: "failed", failureReason: reason } },
-        { new: true },
+        { returnDocument: 'after' },
       )
         .lean()
         .exec();
