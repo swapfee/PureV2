@@ -34,6 +34,8 @@ export const VC_COOLDOWNS_MS = {
   unhide: 3_000,
   permit: 3_000,
   reject: 3_000,
+  mute: 3_000,
+  unmute: 3_000,
   transfer: 5_000,
   info: 3_000,
   delete: 10_000,
@@ -48,6 +50,8 @@ const OWNER_SUBCOMMANDS = new Set<VcSubcommand>([
   "unhide",
   "permit",
   "reject",
+  "mute",
+  "unmute",
   "transfer",
   "delete",
 ]);
@@ -71,6 +75,8 @@ function isVcSubcommand(value: string): value is VcSubcommand {
     case "unhide":
     case "permit":
     case "reject":
+    case "mute":
+    case "unmute":
     case "transfer":
     case "info":
     case "delete":
@@ -675,6 +681,99 @@ export function createVcCommandService(options: {
             return;
           }
           await succeed("Reject Complete", "Member denied and disconnected if present.");
+          return;
+        }
+
+        if (subcommand === "mute" || subcommand === "unmute") {
+          const wantMuted = subcommand === "mute";
+          const failTitle = wantMuted ? "Mute Failed" : "Unmute Failed";
+          const targetUserId = optionValue(sub.options, "member");
+          if (typeof targetUserId !== "string") {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(failTitle, `Provide a member to ${subcommand}.`),
+            );
+            return;
+          }
+          if (targetUserId === interaction.userId) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(failTitle, `You cannot ${subcommand} yourself.`),
+            );
+            return;
+          }
+          const target = await options.discord.getUser({ userId: targetUserId });
+          if (target.kind !== "found") {
+            options.metrics.restFailure();
+            await reply(interaction, deferred, failureResponse(failTitle, "Could not look up that user."));
+            return;
+          }
+          if (target.value.bot) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(failTitle, `You cannot ${subcommand} bots.`),
+            );
+            return;
+          }
+          const targetVoice = await options.discord.getUserVoiceChannel({
+            guildId: auth.channel.guildId,
+            userId: targetUserId,
+          });
+          if (targetVoice.kind !== "found" || targetVoice.value.channelId !== auth.channel.channelId) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(failTitle, "That member must be connected to this channel."),
+            );
+            return;
+          }
+          if (
+            targetVoice.value.serverMuted !== undefined &&
+            targetVoice.value.serverMuted === wantMuted
+          ) {
+            options.metrics.validationFailure();
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(
+                failTitle,
+                wantMuted ? "The member is already muted." : "The member is already unmuted.",
+              ),
+            );
+            return;
+          }
+          const result = await options.discord.setMemberServerMute({
+            guildId: auth.channel.guildId,
+            userId: targetUserId,
+            mute: wantMuted,
+            requestId,
+            reason: wantMuted ? "vc mute" : "vc unmute",
+          });
+          if (result.kind !== "ok") {
+            options.metrics.restFailure();
+            options.logger.warn(`VC ${subcommand} failed`, {
+              ...baseLog,
+              targetUserId,
+              outcome: result.kind,
+            });
+            await reply(
+              interaction,
+              deferred,
+              failureResponse(failTitle, `Could not ${subcommand} that member.`),
+            );
+            return;
+          }
+          await succeed(
+            wantMuted ? "Mute Complete" : "Unmute Complete",
+            wantMuted ? "Member server muted." : "Member server unmute.",
+          );
           return;
         }
 

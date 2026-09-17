@@ -199,11 +199,24 @@ export interface DiscordApiPort {
   getUserVoiceChannel(request: {
     readonly guildId: string;
     readonly userId: string;
-  }): Promise<DiscordValueResult<{ readonly channelId: string | null }>>;
+  }): Promise<
+    DiscordValueResult<{
+      readonly channelId: string | null;
+      /** Server mute when the member has a voice state; omit when unknown. */
+      readonly serverMuted?: boolean;
+    }>
+  >;
   moveMemberToChannel(request: {
     readonly guildId: string;
     readonly userId: string;
     readonly channelId: string | null;
+    readonly requestId: string;
+    readonly reason?: string;
+  }): Promise<DiscordOperationResult>;
+  setMemberServerMute(request: {
+    readonly guildId: string;
+    readonly userId: string;
+    readonly mute: boolean;
     readonly requestId: string;
     readonly reason?: string;
   }): Promise<DiscordOperationResult>;

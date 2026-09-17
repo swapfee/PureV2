@@ -356,14 +356,27 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
     async getUserVoiceChannel(request) {
       try {
         const voiceState = await bot.helpers.getUserVoiceState(request.guildId, request.userId);
+        const muteRaw = Reflect.get(voiceState, "mute");
+        const toggles = Reflect.get(voiceState, "toggles");
+        const toggleMute =
+          typeof toggles === "object" && toggles !== null ? Reflect.get(toggles, "mute") : undefined;
+        const serverMuted =
+          typeof muteRaw === "boolean"
+            ? muteRaw
+            : typeof toggleMute === "boolean"
+              ? toggleMute
+              : undefined;
         return {
           kind: "found" as const,
           value: {
             channelId: voiceState.channelId === undefined ? null : String(voiceState.channelId),
+            ...(serverMuted === undefined ? {} : { serverMuted }),
           },
         };
       } catch (error) {
-        const result = toDiscordValueResult<{ channelId: string | null }>(error);
+        const result = toDiscordValueResult<{ channelId: string | null; serverMuted?: boolean }>(
+          error,
+        );
         // Discord returns 404 when the member is not connected to any voice channel.
         if (result.kind === "missing") {
           return { kind: "found", value: { channelId: null } };
@@ -380,6 +393,25 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           withReason(
             {
               body: { channel_id: request.channelId },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async setMemberServerMute(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PATCH",
+          bot.rest.routes.guilds.members.member(request.guildId, request.userId),
+          withReason(
+            {
+              body: { mute: request.mute },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },
             request.reason,

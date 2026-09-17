@@ -565,6 +565,98 @@ describe("/vc command family", () => {
     expect((await channels.findByChannelId(channelId))?.rejectedUserIds).not.toContain(targetId);
   });
 
+  test("mute and unmute server-mute a connected member", async () => {
+    const { vc, controls, metrics, cooldowns } = await setup();
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+    controls.serverMuteByUser.set(`${guildId}:${targetId}`, false);
+
+    await vc.execute(
+      interaction({
+        id: "mute-absent",
+        guildId,
+        options: [
+          {
+            name: "mute",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    // clear and set voice after verifying absent fails first without voice - actually target has voice
+    expect(controls.muteCalls[0]?.mute).toBe(true);
+    expect(controls.serverMuteByUser.get(`${guildId}:${targetId}`)).toBe(true);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/server muted/i);
+
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "mute-again",
+        guildId,
+        options: [
+          {
+            name: "mute",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already muted/i);
+
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "unmute-1",
+        guildId,
+        options: [
+          {
+            name: "unmute",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(controls.muteCalls.at(-1)?.mute).toBe(false);
+    expect(controls.serverMuteByUser.get(`${guildId}:${targetId}`)).toBe(false);
+
+    cooldowns.clear();
+    await vc.execute(
+      interaction({
+        id: "unmute-again",
+        guildId,
+        options: [
+          {
+            name: "unmute",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already unmuted/i);
+
+    cooldowns.clear();
+    controls.voiceByUser.delete(`${guildId}:${targetId}`);
+    await vc.execute(
+      interaction({
+        id: "mute-disconnected",
+        guildId,
+        options: [
+          {
+            name: "mute",
+            type: 1,
+            options: [{ name: "member", type: 6, value: targetId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/must be connected/i);
+    expect(metrics.snapshot().successes.mute).toBe(1);
+    expect(metrics.snapshot().successes.unmute).toBe(1);
+  });
+
   test("transfer requires connected non-bot member and updates owner", async () => {
     const { vc, channels } = await setup();
     await vc.execute(

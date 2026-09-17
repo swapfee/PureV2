@@ -22,12 +22,15 @@ export interface FakeDiscordChannel {
 export interface FakeDiscordControls {
   readonly channels: Map<string, FakeDiscordChannel>;
   readonly voiceByUser: Map<string, string | null>;
+  /** guildId:userId -> server mute */
+  readonly serverMuteByUser: Map<string, boolean>;
   readonly users: Map<string, { id: string; bot: boolean; username?: string; globalName?: string }>;
   readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string }>;
   readonly createCalls: CreateVoiceChannelRequest[];
   readonly guildChannelCreates: CreateGuildChannelRequest[];
   readonly deleteCalls: { channelId: string; requestId: string }[];
   readonly moveCalls: { guildId: string; userId: string; channelId: string | null; requestId: string }[];
+  readonly muteCalls: { guildId: string; userId: string; mute: boolean; requestId: string }[];
   readonly dmCalls: { userId: string; content: string; requestId: string }[];
   readonly editCalls: { channelId: string; requestId: string; name?: string; userLimit?: number }[];
   readonly overwriteCalls: {
@@ -70,6 +73,7 @@ export interface FakeDiscordControls {
   failNextCreate?: DiscordValueResult<{ id: string }>;
   failNextGuildChannelCreate?: DiscordValueResult<{ id: string }>;
   failNextMove?: DiscordOperationResult;
+  failNextMute?: DiscordOperationResult;
   failNextDelete?: DiscordOperationResult;
   failNextEdit?: DiscordOperationResult;
   failNextOverwrite?: DiscordOperationResult;
@@ -87,12 +91,14 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
   const controls: FakeDiscordControls = {
     channels: seed?.channels ?? new Map(),
     voiceByUser: seed?.voiceByUser ?? new Map(),
+    serverMuteByUser: seed?.serverMuteByUser ?? new Map(),
     users: seed?.users ?? new Map(),
     members: seed?.members ?? new Map(),
     createCalls: [],
     guildChannelCreates: [],
     deleteCalls: [],
     moveCalls: [],
+    muteCalls: [],
     dmCalls: [],
     editCalls: [],
     overwriteCalls: [],
@@ -307,7 +313,14 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       if (!controls.voiceByUser.has(key)) {
         return { kind: "found", value: { channelId: null } };
       }
-      return { kind: "found", value: { channelId: controls.voiceByUser.get(key) ?? null } };
+      const muted = controls.serverMuteByUser.get(key);
+      return {
+        kind: "found",
+        value: {
+          channelId: controls.voiceByUser.get(key) ?? null,
+          ...(muted === undefined ? {} : { serverMuted: muted }),
+        },
+      };
     },
 
     async moveMemberToChannel(request) {
@@ -323,6 +336,22 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         return result;
       }
       controls.voiceByUser.set(`${request.guildId}:${request.userId}`, request.channelId);
+      return { kind: "ok" };
+    },
+
+    async setMemberServerMute(request) {
+      controls.muteCalls.push({
+        guildId: request.guildId,
+        userId: request.userId,
+        mute: request.mute,
+        requestId: request.requestId,
+      });
+      if (controls.failNextMute) {
+        const result = controls.failNextMute;
+        delete controls.failNextMute;
+        return result;
+      }
+      controls.serverMuteByUser.set(`${request.guildId}:${request.userId}`, request.mute);
       return { kind: "ok" };
     },
 

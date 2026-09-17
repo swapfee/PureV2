@@ -81,6 +81,18 @@ const vcCommandData: CreateApplicationCommand = {
     },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
+      name: "mute",
+      description: "Server mute a member in your temporary channel",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "unmute",
+      description: "Remove server mute from a member in your temporary channel",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
       name: "transfer",
       description: "Transfer ownership to a connected member",
       options: [memberOption],

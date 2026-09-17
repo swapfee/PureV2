@@ -9,6 +9,8 @@ export type VcSubcommand =
   | "unhide"
   | "permit"
   | "reject"
+  | "mute"
+  | "unmute"
   | "transfer"
   | "info"
   | "delete";
@@ -45,6 +47,8 @@ function emptySubcounts(): Record<VcSubcommand, number> {
     unhide: 0,
     permit: 0,
     reject: 0,
+    mute: 0,
+    unmute: 0,
     transfer: 0,
     info: 0,
     delete: 0,

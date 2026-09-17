@@ -44,5 +44,6 @@ export const workerDesiredProperties = {
     channelId: true,
     userId: true,
     sessionId: true,
+    mute: true,
   },
 } as const;

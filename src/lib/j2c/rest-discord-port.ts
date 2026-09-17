@@ -129,18 +129,21 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
 
     async getUserVoiceChannel(request) {
       try {
-        const voiceState = await rest.makeRequest<{ channel_id?: string | null }>(
-          "GET",
-          rest.routes.guilds.voice(request.guildId, request.userId),
-        );
+        const voiceState = await rest.makeRequest<{
+          channel_id?: string | null;
+          mute?: boolean;
+        }>("GET", rest.routes.guilds.voice(request.guildId, request.userId));
         return {
           kind: "found" as const,
           value: {
             channelId: voiceState.channel_id ?? null,
+            ...(typeof voiceState.mute === "boolean" ? { serverMuted: voiceState.mute } : {}),
           },
         };
       } catch (error) {
-        const result = toDiscordValueResult<{ channelId: string | null }>(error);
+        const result = toDiscordValueResult<{ channelId: string | null; serverMuted?: boolean }>(
+          error,
+        );
         if (result.kind === "missing") {
           return { kind: "found", value: { channelId: null } };
         }
@@ -165,6 +168,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       } catch (error) {
         return toDiscordOperationResult(error);
       }
+    },
+
+    async setMemberServerMute() {
+      throw new Error("setMemberServerMute is not available on the coordinator Discord port");
     },
 
     async sendDirectMessage() {
