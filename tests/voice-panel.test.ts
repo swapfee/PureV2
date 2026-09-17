@@ -322,8 +322,74 @@ describe("voice panel interactions", () => {
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
       "Only the owner of this voice channel can manage it",
     );
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).not.toContain(
+      "managed voice channel",
+    );
     const other = await channels.findByChannelId(otherChannelId);
     expect(other?.locked).toBe(false);
+  });
+
+  test("refuses foreign panel even when Discord omits channel type", async () => {
+    const otherOwnerId = "666666666666666666";
+    const otherChannelId = "555555555555555555";
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    await channels.create({
+      guildId,
+      channelId: otherChannelId,
+      ownerId: otherOwnerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-2",
+      creationRequestId: "req-2",
+      occupantIds: [otherOwnerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          otherChannelId,
+          {
+            id: otherChannelId,
+            name: "other-room",
+            // type intentionally omitted — REST adapters may leave it undefined
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        userId: ownerId,
+        channelId: otherChannelId,
+        customId: `${VOICE_PANEL_PREFIX}:lock:${otherChannelId}:${otherOwnerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "Only the owner of this voice channel can manage it",
+    );
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).not.toMatch(
+      /managed voice channel/i,
+    );
   });
 
   test("tells owners to connect when using their own panel from elsewhere", async () => {

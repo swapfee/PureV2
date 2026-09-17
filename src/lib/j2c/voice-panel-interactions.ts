@@ -177,11 +177,8 @@ async function requireManagedConnected(options: {
     };
   }
 
-  const channel = await options.discord.getChannel({ channelId });
-  if (channel.kind !== "found" || channel.value.type !== ChannelTypes.GuildVoice) {
-    return { ok: false, reason: "You must be connected to a managed voice channel." };
-  }
-
+  // Voice mismatch first: owners using another managed panel must get the
+  // ownership refusal, not the generic "managed voice channel" connection error.
   const voice = await options.discord.getUserVoiceChannel({
     guildId: interaction.guildId,
     userId: interaction.userId,
@@ -197,6 +194,18 @@ async function requireManagedConnected(options: {
         channels: options.channels,
       }),
     };
+  }
+
+  const channel = await options.discord.getChannel({ channelId });
+  if (channel.kind !== "found") {
+    return { ok: false, reason: "You must be connected to a managed voice channel." };
+  }
+  // Treat missing type as unknown and continue; only reject known non-voice types.
+  if (
+    channel.value.type !== undefined &&
+    channel.value.type !== ChannelTypes.GuildVoice
+  ) {
+    return { ok: false, reason: "You must be connected to a managed voice channel." };
   }
 
   if (!record || record.status !== "active" || record.guildId !== interaction.guildId) {
