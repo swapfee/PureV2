@@ -513,7 +513,7 @@ export function createVcCommandService(options: {
           }
           const dm = await options.discord.sendDirectMessage({
             userId: targetUserId,
-            content: `You are invited to join a voice channel: ${channelInviteLink(auth.channel.guildId, auth.channel.channelId)}`,
+            content: `You have been invited to a temporary voice channel:\n${channelInviteLink(auth.channel.guildId, auth.channel.channelId)}`,
             requestId,
           });
           if (dm.kind !== "ok") {
