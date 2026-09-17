@@ -67,6 +67,10 @@ export function createMemoryGuildConfigRepository(): GuildConfigRepository {
         categoryId: validated.categoryId,
         channelNameTemplate: validated.channelNameTemplate,
         ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
+        ownerCanEdit: validated.ownerCanEdit ?? false,
+        permissionSource: validated.permissionSource ?? "category",
+        namingMode: validated.namingMode ?? "template",
+        sequenceNext: validated.sequenceNext ?? 1,
         moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
@@ -76,6 +80,17 @@ export function createMemoryGuildConfigRepository(): GuildConfigRepository {
     },
     async deleteByGuildId(guildId) {
       return byGuild.delete(guildId);
+    },
+    async claimNextSequenceNumber(guildId) {
+      const existing = byGuild.get(guildId);
+      if (!existing) return undefined;
+      const claimed = existing.sequenceNext;
+      byGuild.set(guildId, {
+        ...existing,
+        sequenceNext: claimed + 1,
+        updatedAt: new Date(),
+      });
+      return claimed;
     },
   };
 }

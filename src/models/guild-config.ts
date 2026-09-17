@@ -1,6 +1,11 @@
 import { Schema, model, type InferSchemaType, type Model } from "mongoose";
 
-import { CHANNEL_NAME_TEMPLATE_MAX, CHANNEL_NAME_TEMPLATE_MIN, DEFAULT_CHANNEL_NAME_TEMPLATE, SNOWFLAKE_PATTERN } from "./snowflake.ts";
+import {
+  CHANNEL_NAME_TEMPLATE_MAX,
+  CHANNEL_NAME_TEMPLATE_MIN,
+  DEFAULT_CHANNEL_NAME_TEMPLATE,
+  SNOWFLAKE_PATTERN,
+} from "./snowflake.ts";
 
 const snowflakeString = {
   type: String,
@@ -8,6 +13,12 @@ const snowflakeString = {
   trim: true,
   match: SNOWFLAKE_PATTERN,
 } as const;
+
+export const GUILD_PERMISSION_SOURCES = ["category", "lobby"] as const;
+export type GuildPermissionSource = (typeof GUILD_PERMISSION_SOURCES)[number];
+
+export const GUILD_NAMING_MODES = ["template", "sequence"] as const;
+export type GuildNamingMode = (typeof GUILD_NAMING_MODES)[number];
 
 const guildConfigSchema = new Schema(
   {
@@ -28,6 +39,33 @@ const guildConfigSchema = new Schema(
       required: false,
       min: 0,
       max: 99,
+    },
+    /** When true, temp-channel owners receive Manage Channel on create. */
+    ownerCanEdit: {
+      type: Boolean,
+      required: true,
+      default: false,
+    },
+    /** Where newly created temporary channels copy permission overwrites from. */
+    permissionSource: {
+      type: String,
+      required: true,
+      enum: GUILD_PERMISSION_SOURCES,
+      default: "category",
+    },
+    /** template = {username} style; sequence = "Base 1", "Base 2", … */
+    namingMode: {
+      type: String,
+      required: true,
+      enum: GUILD_NAMING_MODES,
+      default: "template",
+    },
+    /** Next sequential number to assign (sequence naming mode). */
+    sequenceNext: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 1,
     },
     moderatorRoleIds: {
       type: [String],
@@ -68,6 +106,10 @@ export interface GuildConfigRecord {
   readonly categoryId: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
+  readonly ownerCanEdit: boolean;
+  readonly permissionSource: GuildPermissionSource;
+  readonly namingMode: GuildNamingMode;
+  readonly sequenceNext: number;
   readonly moderatorRoleIds: readonly string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -80,5 +122,9 @@ export interface UpsertGuildConfigInput {
   readonly categoryId: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
+  readonly ownerCanEdit?: boolean;
+  readonly permissionSource?: GuildPermissionSource;
+  readonly namingMode?: GuildNamingMode;
+  readonly sequenceNext?: number;
   readonly moderatorRoleIds?: readonly string[];
 }

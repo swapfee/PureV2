@@ -4,12 +4,26 @@ import {
   isSnowflake,
   type UpsertGuildConfigInput,
 } from "../../models/index.ts";
+import {
+  GUILD_NAMING_MODES,
+  GUILD_PERMISSION_SOURCES,
+  type GuildNamingMode,
+  type GuildPermissionSource,
+} from "../../models/guild-config.ts";
 
 export class GuildConfigValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GuildConfigValidationError";
   }
+}
+
+function isPermissionSource(value: string): value is GuildPermissionSource {
+  return (GUILD_PERMISSION_SOURCES as readonly string[]).includes(value);
+}
+
+function isNamingMode(value: string): value is GuildNamingMode {
+  return (GUILD_NAMING_MODES as readonly string[]).includes(value);
 }
 
 export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): UpsertGuildConfigInput {
@@ -35,6 +49,22 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
     }
   }
 
+  const ownerCanEdit = input.ownerCanEdit === true;
+  const permissionSource = input.permissionSource ?? "category";
+  if (!isPermissionSource(permissionSource)) {
+    throw new GuildConfigValidationError("permissionSource must be category or lobby");
+  }
+
+  const namingMode = input.namingMode ?? "template";
+  if (!isNamingMode(namingMode)) {
+    throw new GuildConfigValidationError("namingMode must be template or sequence");
+  }
+
+  const sequenceNext = input.sequenceNext ?? 1;
+  if (!Number.isInteger(sequenceNext) || sequenceNext < 1) {
+    throw new GuildConfigValidationError("sequenceNext must be an integer >= 1");
+  }
+
   const moderatorRoleIds = (input.moderatorRoleIds ?? []).map((value) => value.trim());
   if (moderatorRoleIds.some((value) => !isSnowflake(value))) {
     throw new GuildConfigValidationError("moderatorRoleIds must contain snowflakes");
@@ -47,6 +77,10 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
     categoryId: input.categoryId,
     channelNameTemplate: channelNameTemplate.length > 0 ? channelNameTemplate : DEFAULT_CHANNEL_NAME_TEMPLATE,
     ...(input.defaultUserLimit === undefined ? {} : { defaultUserLimit: input.defaultUserLimit }),
+    ownerCanEdit,
+    permissionSource,
+    namingMode,
+    sequenceNext,
     moderatorRoleIds,
   };
 }

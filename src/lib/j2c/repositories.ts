@@ -7,6 +7,11 @@ export interface GuildConfigRepository {
   findByGuildId(guildId: string): Promise<GuildConfigRecord | undefined>;
   upsert(input: UpsertGuildConfigInput): Promise<GuildConfigRecord>;
   deleteByGuildId(guildId: string): Promise<boolean>;
+  /**
+   * Atomically claims the next sequential channel number for a guild.
+   * Returns undefined when the guild has no Join-to-Create config.
+   */
+  claimNextSequenceNumber(guildId: string): Promise<number | undefined>;
 }
 
 export interface CreateTemporaryChannelInput {

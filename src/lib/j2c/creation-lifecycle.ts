@@ -1,6 +1,6 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, VoiceStateUpdatePayload } from "../runtime-types.ts";
-import { renderChannelName } from "./channel-name.ts";
+import { renderChannelName, renderSequentialChannelName } from "./channel-name.ts";
 import { pickDisplayName } from "./display-name.ts";
 import type { J2cMetrics } from "./metrics.ts";
 import type {
@@ -16,6 +16,10 @@ import {
   moveRequestId,
 } from "./request-ids.ts";
 import type { ReservationService } from "./reservation-service.ts";
+import {
+  copyChannelPermissionOverwrites,
+  grantOwnerChannelEditAccess,
+} from "./temp-channel-permissions.ts";
 import type { Clock } from "./time.ts";
 import { systemClock } from "./time.ts";
 import { synchronizeTemporaryChannelAccess } from "./voice-controls.ts";
@@ -190,7 +194,14 @@ export function createCreationLifecycle(options: {
         memberId: input.memberId,
         ...(input.username === undefined ? {} : { username: input.username }),
       });
-      const channelName = renderChannelName(config.channelNameTemplate, channelUsername);
+      let channelName: string;
+      if (config.namingMode === "sequence") {
+        const sequence =
+          (await options.configs.claimNextSequenceNumber(input.guildId)) ?? config.sequenceNext;
+        channelName = renderSequentialChannelName(config.channelNameTemplate, sequence);
+      } else {
+        channelName = renderChannelName(config.channelNameTemplate, channelUsername);
+      }
       const created = await options.discord.createVoiceChannel({
         guildId: input.guildId,
         name: channelName,
@@ -218,6 +229,22 @@ export function createCreationLifecycle(options: {
       }
 
       const channelId = created.value.id;
+      if (config.permissionSource === "lobby") {
+        await copyChannelPermissionOverwrites({
+          discord: options.discord,
+          sourceChannelId: config.lobbyChannelId,
+          targetChannelId: channelId,
+          requestId: `${createReqId}:perms`,
+        });
+      }
+      if (config.ownerCanEdit) {
+        await grantOwnerChannelEditAccess({
+          discord: options.discord,
+          channelId,
+          ownerId: input.memberId,
+          requestId: createReqId,
+        });
+      }
       const blockedUserIds = options.blocks
         ? await options.blocks.getBlockedUserIds(input.guildId, input.memberId)
         : [];

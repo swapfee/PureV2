@@ -1,5 +1,14 @@
-export type { GuildConfigRecord, UpsertGuildConfigInput } from "./guild-config.ts";
-export { GuildConfigModel } from "./guild-config.ts";
+export type {
+  GuildConfigRecord,
+  UpsertGuildConfigInput,
+  GuildPermissionSource,
+  GuildNamingMode,
+} from "./guild-config.ts";
+export {
+  GuildConfigModel,
+  GUILD_PERMISSION_SOURCES,
+  GUILD_NAMING_MODES,
+} from "./guild-config.ts";
 export type { TemporaryChannelRecord, TemporaryChannelStatus } from "./temporary-channel.ts";
 export { TemporaryChannelModel, TEMPORARY_CHANNEL_STATUSES } from "./temporary-channel.ts";
 export type { CreationReservationRecord, ReservationStatus } from "./creation-reservation.ts";

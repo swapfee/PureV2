@@ -178,6 +178,7 @@ export interface DiscordApiPort {
     readonly bitrate?: number;
     readonly nsfw?: boolean;
     readonly rtcRegion?: string | null;
+    readonly parentId?: string | null;
     readonly reason?: string;
   }): Promise<DiscordOperationResult>;
   /** Sets or clears the voice channel status (separate from topic/name). */

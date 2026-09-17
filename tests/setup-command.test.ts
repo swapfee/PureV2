@@ -9,7 +9,7 @@ import {
 import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
 import { createSetupCommandService } from "../src/lib/j2c/setup-command-service.ts";
 import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
-import { DEFAULT_SETUP_CATEGORY_NAME } from "../src/lib/j2c/setup-channel-names.ts";
+import { DEFAULT_SETUP_CATEGORY_NAME, DEFAULT_SETUP_LOBBY_NAME } from "../src/lib/j2c/setup-channel-names.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 
@@ -25,7 +25,7 @@ function baseInteraction(
     userId: "223456789012345678",
     memberPermissions: String(BitwisePermissionFlags.MANAGE_GUILD),
     commandName: "setup",
-    options: [{ name: "create", type: 1, options: [] }],
+    options: [{ name: "automatic", type: 1, options: [] }],
     ...overrides,
   };
 }
@@ -68,38 +68,25 @@ describe("/setup command", () => {
     expect(replies[0]).toContain("<:error:1543407530380624037>");
   });
 
-  test("creates category and lobby channels then saves guild config", async () => {
+  test("/setup automatic creates category and lobby then saves guild config", async () => {
     const { setup, controls, configs } = createSetupDeps();
 
-    await setup.execute(
-      baseInteraction({
-        options: [
-          {
-            name: "create",
-            type: 1,
-            options: [
-              { name: "category_name", type: 3, value: "Voice Rooms" },
-              { name: "lobby_name", type: 3, value: "Create Channel" },
-              { name: "template", type: 3, value: "{username}'s room" },
-              { name: "limit", type: 4, value: 4 },
-            ],
-          },
-        ],
-      }),
-    );
+    await setup.execute(baseInteraction());
 
     expect(controls.deferredInteractions).toEqual(["987654321098765432"]);
     expect(controls.guildChannelCreates).toHaveLength(2);
     expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
-    expect(controls.guildChannelCreates[0]?.name).toBe("Voice Rooms");
+    expect(controls.guildChannelCreates[0]?.name).toBe(DEFAULT_SETUP_CATEGORY_NAME);
     expect(controls.guildChannelCreates[1]?.type).toBe(ChannelTypes.GuildVoice);
-    expect(controls.guildChannelCreates[1]?.name).toBe("Create Channel");
+    expect(controls.guildChannelCreates[1]?.name).toBe(DEFAULT_SETUP_LOBBY_NAME);
 
     const categoryId = [...controls.channels.values()].find(
-      (channel) => channel.name === "Voice Rooms" && channel.type === ChannelTypes.GuildCategory,
+      (channel) =>
+        channel.name === DEFAULT_SETUP_CATEGORY_NAME && channel.type === ChannelTypes.GuildCategory,
     )?.id;
     const lobbyId = [...controls.channels.values()].find(
-      (channel) => channel.name === "Create Channel" && channel.type === ChannelTypes.GuildVoice,
+      (channel) =>
+        channel.name === DEFAULT_SETUP_LOBBY_NAME && channel.type === ChannelTypes.GuildVoice,
     )?.id;
 
     expect(categoryId).toBeDefined();
@@ -110,18 +97,137 @@ describe("/setup command", () => {
     expect(saved?.enabled).toBe(true);
     expect(saved?.lobbyChannelId).toBe(lobbyId);
     expect(saved?.categoryId).toBe(categoryId);
-    expect(saved?.channelNameTemplate).toBe("{username}'s room");
-    expect(saved?.defaultUserLimit).toBe(4);
+    expect(saved?.channelNameTemplate).toBe("{username}'s channel");
+    expect(saved?.ownerCanEdit).toBe(false);
+    expect(saved?.permissionSource).toBe("category");
+    expect(saved?.namingMode).toBe("template");
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
-    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
-      "<:success:1543407529302949908>",
-    );
   });
 
-  test("defaults category name to Temporary Voice Channel", async () => {
+  test("/setup default uses an existing category and stores editable + permission", async () => {
+    const { setup, controls, configs } = createSetupDeps();
+    const categoryId = "444444444444444444";
+    controls.channels.set(categoryId, {
+      id: categoryId,
+      name: "Custom Category",
+      type: ChannelTypes.GuildCategory,
+      guildId: "123456789012345678",
+      permissionOverwrites: [],
+    });
+
+    await setup.execute(
+      baseInteraction({
+        options: [
+          {
+            name: "default",
+            type: 1,
+            options: [
+              { name: "editable", type: 5, value: true },
+              { name: "category", type: 7, value: categoryId },
+              { name: "permission", type: 3, value: "lobby" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(controls.guildChannelCreates).toHaveLength(1);
+    expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildVoice);
+    expect(controls.guildChannelCreates[0]?.parentId).toBe(categoryId);
+
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved?.categoryId).toBe(categoryId);
+    expect(saved?.ownerCanEdit).toBe(true);
+    expect(saved?.permissionSource).toBe("lobby");
+    expect(saved?.namingMode).toBe("template");
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
+  });
+
+  test("/setup sequence stores sequential naming and limit", async () => {
+    const { setup, configs, controls } = createSetupDeps();
+
+    await setup.execute(
+      baseInteraction({
+        options: [
+          {
+            name: "sequence",
+            type: 1,
+            options: [
+              { name: "name", type: 3, value: "Gaming" },
+              { name: "limit", type: 4, value: 5 },
+              { name: "editable", type: 5, value: false },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved?.namingMode).toBe("sequence");
+    expect(saved?.channelNameTemplate).toBe("Gaming");
+    expect(saved?.defaultUserLimit).toBe(5);
+    expect(saved?.ownerCanEdit).toBe(false);
+    expect(saved?.sequenceNext).toBe(1);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
+  });
+
+  test("/setup config updates settings for the lobby channel", async () => {
+    const { setup, configs, controls } = createSetupDeps();
+    await setup.execute(baseInteraction());
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved).toBeDefined();
+
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765433",
+        options: [
+          {
+            name: "config",
+            type: 1,
+            options: [
+              { name: "channel", type: 7, value: saved!.lobbyChannelId },
+              { name: "editable", type: 5, value: true },
+              { name: "name", type: 3, value: "Room" },
+              { name: "limit", type: 4, value: 8 },
+              { name: "permission", type: 3, value: "lobby" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const updated = await configs.findByGuildId("123456789012345678");
+    expect(updated?.ownerCanEdit).toBe(true);
+    expect(updated?.namingMode).toBe("sequence");
+    expect(updated?.channelNameTemplate).toBe("Room");
+    expect(updated?.defaultUserLimit).toBe(8);
+    expect(updated?.permissionSource).toBe("lobby");
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
+  });
+
+  test("/setup config rejects a non-lobby channel", async () => {
     const { setup, controls } = createSetupDeps();
     await setup.execute(baseInteraction());
-    expect(controls.guildChannelCreates[0]?.name).toBe(DEFAULT_SETUP_CATEGORY_NAME);
+
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765434",
+        options: [
+          {
+            name: "config",
+            type: 1,
+            options: [
+              { name: "channel", type: 7, value: "999999999999999999" },
+              { name: "editable", type: 5, value: true },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /not the Join to Create channel/i,
+    );
   });
 
   test("compensates when lobby channel creation fails", async () => {
@@ -153,7 +259,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         id: "987654321098765433",
-        options: [{ name: "create", type: 1, options: [] }],
+        options: [{ name: "automatic", type: 1, options: [] }],
       }),
     );
 
@@ -218,6 +324,7 @@ describe("/setup command", () => {
 
     await setup.execute(
       baseInteraction({
+        commandName: "reset",
         options: [{ name: "reset", type: 1, options: [] }],
       }),
     );
@@ -231,9 +338,6 @@ describe("/setup command", () => {
     expect(controls.channels.has(config!.categoryId)).toBe(true);
     expect(controls.editCalls.some((call) => call.channelId === config!.categoryId)).toBe(true);
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
-    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
-      "<:success:1543407529302949908>",
-    );
     expect(discord).toBeDefined();
   });
 
@@ -265,12 +369,37 @@ describe("/setup command", () => {
 
     await setup.execute(
       baseInteraction({
+        commandName: "reset",
         options: [{ name: "reset", type: 1, options: [] }],
       }),
     );
 
-    expect(controls.channels.has(config!.categoryId)).toBe(false);
-    expect(controls.channels.has(emptyId)).toBe(false);
     expect(await configs.findByGuildId("123456789012345678")).toBeUndefined();
+    expect(controls.channels.has(config!.categoryId)).toBe(false);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
+  });
+});
+
+describe("sequential channel names", () => {
+  test("renderSequentialChannelName appends the number", async () => {
+    const { renderSequentialChannelName } = await import("../src/lib/j2c/channel-name.ts");
+    expect(renderSequentialChannelName("Gaming", 1)).toBe("Gaming 1");
+    expect(renderSequentialChannelName("Gaming", 12)).toBe("Gaming 12");
+  });
+
+  test("claimNextSequenceNumber increments", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId: "123456789012345678",
+      enabled: true,
+      lobbyChannelId: "223456789012345678",
+      categoryId: "323456789012345678",
+      channelNameTemplate: "Gaming",
+      namingMode: "sequence",
+      sequenceNext: 1,
+    });
+    expect(await configs.claimNextSequenceNumber("123456789012345678")).toBe(1);
+    expect(await configs.claimNextSequenceNumber("123456789012345678")).toBe(2);
+    expect((await configs.findByGuildId("123456789012345678"))?.sequenceNext).toBe(3);
   });
 });

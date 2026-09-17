@@ -192,10 +192,9 @@ async function requireManagedConnected(options: {
     return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
   // Treat missing type as unknown and continue; only reject known non-voice types.
-  if (
-    channel.value.type !== undefined &&
-    channel.value.type !== ChannelTypes.GuildVoice
-  ) {
+  const guildVoiceType: number = ChannelTypes.GuildVoice;
+  const channelType = channel.value.type;
+  if (channelType !== undefined && channelType !== guildVoiceType) {
     return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
 

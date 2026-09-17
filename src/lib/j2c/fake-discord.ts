@@ -51,6 +51,7 @@ export interface FakeDiscordControls {
     bitrate?: number;
     nsfw?: boolean;
     rtcRegion?: string | null;
+    parentId?: string | null;
   }[];
   readonly voiceStatusCalls: { channelId: string; requestId: string; status: string | null }[];
   readonly overwriteCalls: {
@@ -305,6 +306,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         ...(request.bitrate === undefined ? {} : { bitrate: request.bitrate }),
         ...(request.nsfw === undefined ? {} : { nsfw: request.nsfw }),
         ...(request.rtcRegion === undefined ? {} : { rtcRegion: request.rtcRegion }),
+        ...(request.parentId === undefined ? {} : { parentId: request.parentId }),
       });
       if (controls.failNextEdit) {
         const result = controls.failNextEdit;
@@ -318,6 +320,13 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       if (request.bitrate !== undefined) channel.bitrate = request.bitrate;
       if (request.nsfw !== undefined) channel.nsfw = request.nsfw;
       if (request.rtcRegion !== undefined) channel.rtcRegion = request.rtcRegion;
+      if (request.parentId !== undefined) {
+        if (request.parentId === null) {
+          delete channel.parentId;
+        } else {
+          channel.parentId = request.parentId;
+        }
+      }
       return { kind: "ok" };
     },
 

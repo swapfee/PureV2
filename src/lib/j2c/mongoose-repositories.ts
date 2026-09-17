@@ -28,10 +28,17 @@ function toGuildRecord(doc: {
   categoryId: string;
   channelNameTemplate: string;
   defaultUserLimit?: number | null;
+  ownerCanEdit?: boolean | null;
+  permissionSource?: string | null;
+  namingMode?: string | null;
+  sequenceNext?: number | null;
   moderatorRoleIds: string[];
   createdAt: Date;
   updatedAt: Date;
 }): GuildConfigRecord {
+  const permissionSource =
+    doc.permissionSource === "lobby" ? "lobby" : "category";
+  const namingMode = doc.namingMode === "sequence" ? "sequence" : "template";
   return {
     guildId: doc.guildId,
     enabled: doc.enabled,
@@ -41,6 +48,11 @@ function toGuildRecord(doc: {
     ...(doc.defaultUserLimit === undefined || doc.defaultUserLimit === null
       ? {}
       : { defaultUserLimit: doc.defaultUserLimit }),
+    ownerCanEdit: doc.ownerCanEdit === true,
+    permissionSource,
+    namingMode,
+    sequenceNext:
+      typeof doc.sequenceNext === "number" && doc.sequenceNext >= 1 ? doc.sequenceNext : 1,
     moderatorRoleIds: [...doc.moderatorRoleIds],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -131,31 +143,32 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
     },
     async upsert(input: UpsertGuildConfigInput) {
       const validated = validateUpsertGuildConfigInput(input);
+      const setFields: Record<string, unknown> = {
+        enabled: validated.enabled,
+        lobbyChannelId: validated.lobbyChannelId,
+        categoryId: validated.categoryId,
+        channelNameTemplate: validated.channelNameTemplate,
+        moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+        ownerCanEdit: validated.ownerCanEdit ?? false,
+        permissionSource: validated.permissionSource ?? "category",
+        namingMode: validated.namingMode ?? "template",
+        sequenceNext: validated.sequenceNext ?? 1,
+      };
       const update =
         validated.defaultUserLimit === undefined
           ? {
-              $set: {
-                enabled: validated.enabled,
-                lobbyChannelId: validated.lobbyChannelId,
-                categoryId: validated.categoryId,
-                channelNameTemplate: validated.channelNameTemplate,
-                moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
-              },
+              $set: setFields,
               $unset: { defaultUserLimit: 1 },
             }
           : {
               $set: {
-                enabled: validated.enabled,
-                lobbyChannelId: validated.lobbyChannelId,
-                categoryId: validated.categoryId,
-                channelNameTemplate: validated.channelNameTemplate,
-                moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+                ...setFields,
                 defaultUserLimit: validated.defaultUserLimit,
               },
             };
       const doc = await GuildConfigModel.findOneAndUpdate({ guildId: validated.guildId }, update, {
         upsert: true,
-        returnDocument: 'after',
+        returnDocument: "after",
         setDefaultsOnInsert: true,
       })
         .lean()
@@ -166,6 +179,29 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
     async deleteByGuildId(guildId) {
       const result = await GuildConfigModel.deleteOne({ guildId }).exec();
       return result.deletedCount > 0;
+    },
+    async claimNextSequenceNumber(guildId) {
+      await GuildConfigModel.updateOne(
+        {
+          guildId,
+          $or: [
+            { sequenceNext: { $exists: false } },
+            { sequenceNext: null },
+            { sequenceNext: { $lte: 0 } },
+          ],
+        },
+        { $set: { sequenceNext: 1 } },
+      ).exec();
+
+      const doc = await GuildConfigModel.findOneAndUpdate(
+        { guildId },
+        { $inc: { sequenceNext: 1 } },
+        { returnDocument: "before" },
+      )
+        .lean()
+        .exec();
+      if (!doc) return undefined;
+      return typeof doc.sequenceNext === "number" && doc.sequenceNext >= 1 ? doc.sequenceNext : 1;
     },
   };
 }

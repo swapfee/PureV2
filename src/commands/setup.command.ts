@@ -1,37 +1,119 @@
-import { ApplicationCommandOptionTypes, type CreateApplicationCommand } from "discordeno";
+import {
+  ApplicationCommandOptionTypes,
+  ChannelTypes,
+  type CreateApplicationCommand,
+} from "discordeno";
 
 import type { CommandModule } from "../handlers/types.ts";
 import { failureResponse } from "../lib/j2c/action-response.ts";
 
 const setupCommandData: CreateApplicationCommand = {
   name: "setup",
-  description: "Configure or reset Join-to-Create for this server",
+  description: "Configure Join-to-Create for this server",
   options: [
     {
       type: ApplicationCommandOptionTypes.SubCommand,
-      name: "create",
-      description: "Create the Temporary Voice Channel category and Join to Create lobby",
+      name: "automatic",
+      description: "Automatically create a category and Join to Create channel",
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "default",
+      description: "Create a Join to Create channel with username-based names",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.Boolean,
+          name: "editable",
+          description: "Do you want the channel to be editable by the user?",
+          required: true,
+        },
+        {
+          type: ApplicationCommandOptionTypes.Channel,
+          name: "category",
+          description: "The category you want the channels to be created in",
+          required: false,
+          channelTypes: [ChannelTypes.GuildCategory],
+        },
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "permission",
+          description: "Copy category permissions or Join to Create permissions?",
+          required: false,
+          choices: [
+            { name: "Category", value: "category" },
+            { name: "Join to Create", value: "lobby" },
+          ],
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "sequence",
+      description: "Create sequential channels that increment as more are made",
       options: [
         {
           type: ApplicationCommandOptionTypes.String,
-          name: "category_name",
-          description: "Name for the new category (default: Temporary Voice Channel)",
-          required: false,
+          name: "name",
+          description: "Base name for sequential channels",
+          required: true,
           minLength: 1,
           maxLength: 100,
         },
         {
-          type: ApplicationCommandOptionTypes.String,
-          name: "lobby_name",
-          description: "Name for the join-to-create voice channel (default: Join to Create)",
+          type: ApplicationCommandOptionTypes.Integer,
+          name: "limit",
+          description: "User limit for created channels (0-99)",
+          required: true,
+          minValue: 0,
+          maxValue: 99,
+        },
+        {
+          type: ApplicationCommandOptionTypes.Boolean,
+          name: "editable",
+          description: "Do you want the channel to be editable by the user?",
+          required: true,
+        },
+        {
+          type: ApplicationCommandOptionTypes.Channel,
+          name: "category",
+          description: "The category you want the channels to be created in",
           required: false,
-          minLength: 1,
-          maxLength: 100,
+          channelTypes: [ChannelTypes.GuildCategory],
         },
         {
           type: ApplicationCommandOptionTypes.String,
-          name: "template",
-          description: "Temporary channel name template (default: {username}'s channel)",
+          name: "permission",
+          description: "Copy category permissions or Join to Create permissions?",
+          required: false,
+          choices: [
+            { name: "Category", value: "category" },
+            { name: "Join to Create", value: "lobby" },
+          ],
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "config",
+      description: "Modify an existing setup's settings",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.Channel,
+          name: "channel",
+          description: "The Join to Create channel to configure",
+          required: true,
+          channelTypes: [ChannelTypes.GuildVoice],
+        },
+        {
+          type: ApplicationCommandOptionTypes.Boolean,
+          name: "editable",
+          description: "Do you want the channel to be editable by the user?",
+          required: false,
+        },
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "name",
+          description: "Base name for sequential channels",
           required: false,
           minLength: 1,
           maxLength: 100,
@@ -39,30 +121,29 @@ const setupCommandData: CreateApplicationCommand = {
         {
           type: ApplicationCommandOptionTypes.Integer,
           name: "limit",
-          description: "Default user limit for new temporary channels (0 = unlimited)",
+          description: "User limit for created channels (0-99)",
           required: false,
           minValue: 0,
           maxValue: 99,
         },
         {
-          type: ApplicationCommandOptionTypes.Boolean,
-          name: "enabled",
-          description: "Enable Join-to-Create (default: true)",
+          type: ApplicationCommandOptionTypes.Channel,
+          name: "category",
+          description: "The category you want the channels to be created in",
           required: false,
+          channelTypes: [ChannelTypes.GuildCategory],
         },
         {
-          type: ApplicationCommandOptionTypes.Role,
-          name: "moderator_role",
-          description: "Optional moderator role for J2C management",
+          type: ApplicationCommandOptionTypes.String,
+          name: "permission",
+          description: "Copy category permissions or Join to Create permissions?",
           required: false,
+          choices: [
+            { name: "Category", value: "category" },
+            { name: "Join to Create", value: "lobby" },
+          ],
         },
       ],
-    },
-    {
-      type: ApplicationCommandOptionTypes.SubCommand,
-      name: "reset",
-      description:
-        "Factory reset: remove Join-to-Create, delete empty temp channels, keep occupied ones",
     },
   ],
 };
@@ -75,8 +156,7 @@ const setupCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse("Setup is currently unavailable.")
-          .embeds,
+        embeds: failureResponse("Setup is currently unavailable.").embeds,
         ephemeral: true,
       });
       return;

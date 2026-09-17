@@ -291,6 +291,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
                 ...(request.bitrate === undefined ? {} : { bitrate: request.bitrate }),
                 ...(request.nsfw === undefined ? {} : { nsfw: request.nsfw }),
                 ...(request.rtcRegion === undefined ? {} : { rtc_region: request.rtcRegion }),
+                ...(request.parentId === undefined ? {} : { parent_id: request.parentId }),
               },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },

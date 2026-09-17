@@ -98,6 +98,41 @@ describe("creation lifecycle", () => {
     expect(metrics.snapshot().activeTemporaryChannels).toBe(1);
   });
 
+  test("uses sequential names and grants owner edit access when configured", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "Gaming",
+      namingMode: "sequence",
+      sequenceNext: 1,
+      ownerCanEdit: true,
+      defaultUserLimit: 4,
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-seq-1",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(controls.createCalls[0]?.name).toBe("Gaming 1");
+    expect(controls.createCalls[0]?.userLimit).toBe(4);
+    expect(controls.overwriteCalls.some((call) => call.overwriteId === memberId)).toBe(true);
+    expect((await configs.findByGuildId(guildId))?.sequenceNext).toBe(2);
+  });
+
   test("cancels when the user leaves the lobby before channel creation", async () => {
     const configs = createMemoryGuildConfigRepository();
     await seedConfig(configs);
