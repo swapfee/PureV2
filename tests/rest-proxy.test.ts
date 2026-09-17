@@ -127,8 +127,9 @@ describe("coordinator REST proxy", () => {
       }),
       metrics,
       executeRequest: async () => {
-        const error = new Error("Failed to send request to discord.") as Error & { status: number };
-        error.status = 404;
+        const error = Object.assign(new Error("Failed to send request to discord."), {
+          status: 404,
+        });
         throw error;
       },
     });
