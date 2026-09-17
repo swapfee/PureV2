@@ -12,8 +12,12 @@ import { createOwnershipService, type OwnershipService } from "./ownership.ts";
 import { createReconciler, type ReconciliationResult } from "./reconciliation.ts";
 import { createReservationService } from "./reservation-service.ts";
 import type { Clock, TimerScheduler } from "./time.ts";
+import { systemTimerScheduler } from "./time.ts";
 import { createVoiceOccupancyTracker, type VoiceOccupancyTracker } from "./voice-occupancy.ts";
 import { createVoiceStateHandler, type VoiceStateHandler } from "./voice-state-handler.ts";
+
+/** Second sweep after seed/reconcile to catch leaves during the restart window. */
+export const RESTART_EMPTY_CHANNEL_RESWEEP_MS = 5_000;
 
 export interface J2cReadinessState {
   readonly modelsInitialized: boolean;
@@ -42,6 +46,16 @@ export interface J2cRuntime {
    * that are empty in the occupancy cache (covers worker restart without a leave event).
    */
   scheduleEmptyChannelDeletions(guildId: string): Promise<void>;
+  /**
+   * Queue a delayed empty-channel sweep for leaves that arrive during the
+   * seed/reconcile restart window after the immediate sweep already ran.
+   */
+  scheduleEmptyChannelDeletionResweep(guildId: string): void;
+  /**
+   * After occupancy reconcile, queue delayed empty sweeps for every guild that
+   * still has active temporary channels (restart-window leave catch).
+   */
+  scheduleRestartEmptyChannelResweeps(): Promise<void>;
   /** Runs database/REST reconcile only; occupancy must be completed separately after warm-up. */
   reconcile(): Promise<ReconciliationResult>;
   snapshotMetrics(): J2cMetricsSnapshot;
@@ -110,6 +124,9 @@ export function createJ2cRuntime(options: {
       : { concurrency: options.reconcileConcurrency }),
   });
 
+  const timers = options.timers ?? systemTimerScheduler();
+  const restartResweepPending = new Set<string>();
+
   const scheduleEmptyChannelDeletions = async (guildId: string): Promise<void> => {
     if (!occupancy.isReady()) return;
     const active = await options.channels.listActiveByGuild(guildId);
@@ -117,6 +134,28 @@ export function createJ2cRuntime(options: {
       const occupants = occupancy.getOccupants(record.guildId, record.channelId);
       if (occupants.kind !== "known") continue;
       await deletion.onOccupantsChanged(record.channelId, occupants.userIds);
+    }
+  };
+
+  const scheduleEmptyChannelDeletionResweep = (guildId: string): void => {
+    if (restartResweepPending.has(guildId)) return;
+    restartResweepPending.add(guildId);
+    timers.schedule(RESTART_EMPTY_CHANNEL_RESWEEP_MS, () => {
+      restartResweepPending.delete(guildId);
+      return scheduleEmptyChannelDeletions(guildId).catch((error: unknown) => {
+        options.logger.error("Failed delayed empty-channel resweep after restart", {
+          guildId,
+          error,
+        });
+      });
+    });
+  };
+
+  const scheduleRestartEmptyChannelResweeps = async (): Promise<void> => {
+    const active = await options.channels.listByStatus(["active"]);
+    const guildIds = new Set(active.map((record) => record.guildId));
+    for (const guildId of guildIds) {
+      scheduleEmptyChannelDeletionResweep(guildId);
     }
   };
 
@@ -198,6 +237,8 @@ export function createJ2cRuntime(options: {
       }
     },
     scheduleEmptyChannelDeletions,
+    scheduleEmptyChannelDeletionResweep,
+    scheduleRestartEmptyChannelResweeps,
     async reconcile() {
       return this.reconcileDatabaseRest();
     },

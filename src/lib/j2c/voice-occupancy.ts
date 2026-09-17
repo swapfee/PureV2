@@ -6,6 +6,9 @@
  *
  * Ordering: each update carries a monotonic receivedSeq. Stale leaves that arrive
  * after a newer join for the same user are ignored.
+ *
+ * GUILD_CREATE seeding is authoritative for that guild: prior occupants are cleared,
+ * and seed rows use sequence 0 so any subsequent real VSU (sequence >= 1) wins.
  */
 
 export interface VoiceStateObservation {
@@ -64,15 +67,21 @@ export function createVoiceOccupancyTracker(): VoiceOccupancyTracker {
     },
 
     seedGuildVoiceStates(guildId, states) {
-      let sequence = 0;
+      // GUILD_CREATE voice_states is an authoritative snapshot for this guild.
+      // Clear prior occupants first so earlier VOICE_STATE_UPDATE merges (and their
+      // higher sequences) cannot override an empty/leave-while-offline seed.
+      // Seed entries use sequence 0 so any subsequent real gateway VSU (seq >= 1) wins.
+      const prefix = `${guildId}:`;
+      for (const key of byUser.keys()) {
+        if (key.startsWith(prefix)) {
+          byUser.delete(key);
+        }
+      }
       for (const state of states) {
-        sequence += 1;
-        this.apply({
-          guildId,
-          userId: state.userId,
+        if (state.isBot) continue;
+        byUser.set(userKey(guildId, state.userId), {
           channelId: state.channelId,
-          sequence,
-          ...(state.isBot ? { isBot: true } : {}),
+          sequence: 0,
         });
       }
       seededGuilds.add(guildId);

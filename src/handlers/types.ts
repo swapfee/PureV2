@@ -47,6 +47,8 @@ export interface J2cEventServices {
    * without waiting for a subsequent leave event.
    */
   scheduleEmptyChannelDeletions(guildId: string): Promise<void>;
+  /** Delayed second sweep for leaves during the restart seed window. */
+  scheduleEmptyChannelDeletionResweep(guildId: string): void;
 }
 
 export interface EventContext {

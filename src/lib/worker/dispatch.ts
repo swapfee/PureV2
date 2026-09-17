@@ -274,6 +274,7 @@ export function wireBotEvents(
         error,
       });
     });
+    context.j2c.scheduleEmptyChannelDeletionResweep(guildId);
   };
 }
 

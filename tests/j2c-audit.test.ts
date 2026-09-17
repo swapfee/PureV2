@@ -299,6 +299,41 @@ describe("voice occupancy tracker", () => {
       userIds: [ownerId],
     });
   });
+
+  test("empty seed replaces prior high-sequence occupants (leave while offline)", () => {
+    const occupancy = createVoiceOccupancyTracker();
+    // First contact marks the guild seeded while a high-seq VSU still shows presence.
+    occupancy.seedGuildVoiceStates(guildId, [{ userId: ownerId, channelId }]);
+    occupancy.markReady();
+    occupancy.apply({ guildId, userId: ownerId, channelId, sequence: 50 });
+    expect(occupancy.getOccupants(guildId, channelId)).toEqual({
+      kind: "known",
+      userIds: [ownerId],
+    });
+
+    // Authoritative empty GUILD_CREATE snapshot must clear them despite seq 50.
+    occupancy.seedGuildVoiceStates(guildId, []);
+    expect(occupancy.getOccupants(guildId, channelId)).toEqual({
+      kind: "known",
+      userIds: [],
+    });
+  });
+
+  test("post-seed leave with low gateway sequence still clears occupancy", () => {
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [
+      { userId: ownerId, channelId },
+      { userId: otherId, channelId },
+    ]);
+    occupancy.markReady();
+    // Coordinator voiceSequence after GUILD_CREATE is often smaller than a
+    // naive seed counter would have been; sequence 1 must still win over seed.
+    occupancy.apply({ guildId, userId: ownerId, channelId: null, sequence: 1 });
+    expect(occupancy.getOccupants(guildId, channelId)).toEqual({
+      kind: "known",
+      userIds: [otherId],
+    });
+  });
 });
 
 describe("j2c readiness after occupancy warm-up", () => {

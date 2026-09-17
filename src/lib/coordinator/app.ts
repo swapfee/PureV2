@@ -84,6 +84,11 @@ function observeGatewayVoiceState(
       sequence,
       ...(isBot ? { isBot: true } : {}),
     });
+    // Coordinator occupancy is separate from the worker voice-state-handler path;
+    // schedule empty-temp deletion when a leave/move may have emptied a tracked channel.
+    if (runtime.occupancy.isReady()) {
+      void runtime.scheduleEmptyChannelDeletions(guildId);
+    }
     return;
   }
 
@@ -107,6 +112,7 @@ function observeGatewayVoiceState(
     // Late GUILD_CREATE after initial occupancy reconcile still needs empty-channel sweep.
     if (runtime.occupancy.isReady()) {
       void runtime.scheduleEmptyChannelDeletions(guildId);
+      runtime.scheduleEmptyChannelDeletionResweep(guildId);
     }
   }
 }
@@ -386,6 +392,7 @@ export function createCoordinatorRuntime(
 
       j2cRuntime.markOccupancyReady(true);
       await j2cRuntime.reconcileOccupancy();
+      await j2cRuntime.scheduleRestartEmptyChannelResweeps();
 
       serviceReady = true;
 

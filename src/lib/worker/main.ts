@@ -133,6 +133,7 @@ export async function runWorkerMain(): Promise<void> {
         isReady: () => j2c.occupancy.isReady(),
       },
       scheduleEmptyChannelDeletions: (guildId) => j2c.scheduleEmptyChannelDeletions(guildId),
+      scheduleEmptyChannelDeletionResweep: (guildId) => j2c.scheduleEmptyChannelDeletionResweep(guildId),
     },
   };
   wireBotEvents(bot, events, context);
