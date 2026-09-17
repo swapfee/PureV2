@@ -3,7 +3,8 @@ import { ChannelTypes } from "discordeno";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import { ACTION_EMOJIS, failureResponse, successResponse } from "./action-response.ts";
-import type { TemporaryChannelRepository } from "./repositories.ts";
+import { applyOwnerHandoffPresentation } from "./owner-handoff.ts";
+import type { GuildConfigRepository, TemporaryChannelRepository } from "./repositories.ts";
 import {
   buildDeleteConfirmation,
   buildLimitModal,
@@ -18,7 +19,6 @@ import {
   isVoicePanelAction,
   type VoicePanelAction,
 } from "./voice-panel.ts";
-import { refreshVoiceControlPanel } from "./voice-panel-service.ts";
 import {
   isConnectDenied,
   isViewDenied,
@@ -138,6 +138,7 @@ async function requireManagedConnected(options: {
 
 export function createVoicePanelInteractionHandler(options: {
   readonly channels: TemporaryChannelRepository;
+  readonly configs?: GuildConfigRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -146,6 +147,7 @@ export function createVoicePanelInteractionHandler(options: {
   execute(interaction: InteractionCreatePayload): Promise<void>;
 } {
   const { channels, discord, logger, botUsername } = options;
+  const configs = options.configs;
 
   return {
     handles(interaction) {
@@ -171,6 +173,7 @@ export function createVoicePanelInteractionHandler(options: {
             interaction,
             parts,
             channels,
+            ...(configs ? { configs } : {}),
             discord,
             logger,
             botUsername,
@@ -187,6 +190,7 @@ export function createVoicePanelInteractionHandler(options: {
             interaction,
             parts,
             channels,
+            ...(configs ? { configs } : {}),
             discord,
             logger,
             botUsername,
@@ -223,6 +227,7 @@ async function handlePanelButton(input: {
   readonly interaction: InteractionCreatePayload;
   readonly parts: readonly string[];
   readonly channels: TemporaryChannelRepository;
+  readonly configs?: GuildConfigRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -528,15 +533,17 @@ async function handlePanelButton(input: {
       );
       return;
     }
-    await refreshVoiceControlPanel({
+    await applyOwnerHandoffPresentation({
       discord: input.discord,
       channels: input.channels,
+      ...(input.configs ? { configs: input.configs } : {}),
       logger: input.logger,
+      guildId: access.record.guildId,
       channelId,
-      ownerId: input.interaction.userId,
+      newOwnerId: input.interaction.userId,
       botUsername: input.botUsername,
-      ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
       requestId: `panel:claim:${input.interaction.id}`,
+      ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
     });
     await replyEphemeral(
       input.discord,
@@ -715,6 +722,7 @@ async function handleTransferSelect(input: {
   readonly interaction: InteractionCreatePayload;
   readonly parts: readonly string[];
   readonly channels: TemporaryChannelRepository;
+  readonly configs?: GuildConfigRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -806,15 +814,17 @@ async function handleTransferSelect(input: {
     return;
   }
 
-  await refreshVoiceControlPanel({
+  await applyOwnerHandoffPresentation({
     discord: input.discord,
     channels: input.channels,
+    ...(input.configs ? { configs: input.configs } : {}),
     logger: input.logger,
+    guildId: access.record.guildId,
     channelId,
-    ownerId: targetUserId,
+    newOwnerId: targetUserId,
     botUsername: input.botUsername,
-    ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
     requestId: `panel:transfer:${input.interaction.id}`,
+    ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
   });
 
   await input.discord.editInteractionResponse({
@@ -887,11 +897,6 @@ async function handleDeleteConfirm(input: {
     return;
   }
   await input.channels.remove(channelId);
-  await input.discord.editInteractionResponse({
-    applicationId: input.interaction.applicationId,
-    interactionToken: input.interaction.token,
-    embeds: successResponse("Delete Complete", "Temporary channel deleted.").embeds,
-    components: [],
-  });
+  // Channel (and this confirmation message) are gone — do not edit the interaction.
   input.replyState.answered = true;
 }

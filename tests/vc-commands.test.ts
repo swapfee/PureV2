@@ -675,6 +675,7 @@ describe("/vc command family", () => {
     expect((await channels.findByChannelId(channelId))?.ownerId).toBe(ownerId);
 
     const { vc: vc2, controls, channels: channels2 } = await setup();
+    controls.users.set(targetId, { id: targetId, bot: false, username: "newbie" });
     controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
     await vc2.execute(
       interaction({
@@ -690,6 +691,7 @@ describe("/vc command family", () => {
       }),
     );
     expect((await channels2.findByChannelId(channelId))?.ownerId).toBe(targetId);
+    expect(controls.channels.get(channelId)?.name).toBe("newbie's channel");
   });
 
   test("info works for connected non-owner and delete removes channel", async () => {

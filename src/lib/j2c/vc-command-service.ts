@@ -7,7 +7,7 @@ import {
   authorizeVcOwner,
   vcAuthUserMessage,
 } from "./vc-auth.ts";
-import type { TemporaryChannelRepository } from "./repositories.ts";
+import type { TemporaryChannelRepository, GuildConfigRepository } from "./repositories.ts";
 import type { VcMetrics, VcSubcommand } from "./vc-metrics.ts";
 import {
   channelInviteLink,
@@ -22,7 +22,7 @@ import {
   temporaryChannelLockMatches,
   temporaryChannelVisibilityMatches,
 } from "./voice-controls.ts";
-import { refreshVoiceControlPanel } from "./voice-panel-service.ts";
+import { applyOwnerHandoffPresentation } from "./owner-handoff.ts";
 
 export const VC_COOLDOWNS_MS = {
   invite: 3_000,
@@ -119,6 +119,7 @@ export interface VcCommandService {
 
 export function createVcCommandService(options: {
   readonly channels: TemporaryChannelRepository;
+  readonly configs?: GuildConfigRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly metrics: VcMetrics;
@@ -851,24 +852,24 @@ export function createVcCommandService(options: {
             );
             return;
           }
-          if (options.botUsername) {
-            try {
-              await refreshVoiceControlPanel({
-                discord: options.discord,
-                channels: options.channels,
-                logger: options.logger,
-                channelId: auth.channel.channelId,
-                ownerId: targetUserId,
-                botUsername: options.botUsername,
-                ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
-                requestId: `${requestId}:panel`,
-              });
-            } catch (error) {
-              options.logger.warn("VC transfer panel refresh failed", {
-                ...baseLog,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
+          try {
+            await applyOwnerHandoffPresentation({
+              discord: options.discord,
+              channels: options.channels,
+              ...(options.configs ? { configs: options.configs } : {}),
+              logger: options.logger,
+              guildId: auth.channel.guildId,
+              channelId: auth.channel.channelId,
+              newOwnerId: targetUserId,
+              ...(options.botUsername ? { botUsername: options.botUsername } : {}),
+              ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
+              requestId,
+            });
+          } catch (error) {
+            options.logger.warn("VC transfer owner presentation update failed", {
+              ...baseLog,
+              error: error instanceof Error ? error.message : String(error),
+            });
           }
           await succeed("Transfer Complete", `Ownership transferred to <@${targetUserId}>.`);
           return;

@@ -420,9 +420,13 @@ describe("voice panel interactions", () => {
 
     const record = await channels.findByChannelId(channelId);
     expect(record?.ownerId).toBe(memberId);
+    expect(controls.channels.get(channelId)?.name).toBe("claimer's channel");
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
       "You are now the channel owner",
     );
+    // Panel refresh should mention the new owner in Components V2 content.
+    const panelEdit = controls.editedChannelMessages.at(-1) ?? controls.channelMessages.at(-1);
+    expect(JSON.stringify(panelEdit?.components ?? [])).toContain(memberId);
   });
 });
 
@@ -894,5 +898,52 @@ describe("voice panel access gates", () => {
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
       "You must own this voice channel",
     );
+  });
+
+  test("delete confirm removes channel without a follow-up message", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    const editsBefore = controls.editedInteractions.length;
+    await handler.execute(
+      interaction({
+        customId: `voice-delete:confirm:${channelId}`,
+      }),
+    );
+
+    expect(controls.deleteCalls.some((call) => call.channelId === channelId)).toBe(true);
+    expect(await channels.findByChannelId(channelId)).toBeUndefined();
+    expect(controls.editedInteractions.length).toBe(editsBefore);
   });
 });

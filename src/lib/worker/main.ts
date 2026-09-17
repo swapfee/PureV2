@@ -88,6 +88,7 @@ export async function runWorkerMain(): Promise<void> {
 
   const vc = createVcCommandService({
     channels: channelsRepo,
+    configs: configsRepo,
     discord,
     logger: logger.child({ component: "vc" }),
     metrics: createVcMetrics(),
@@ -106,6 +107,7 @@ export async function runWorkerMain(): Promise<void> {
 
   const voicePanel = createVoicePanelInteractionHandler({
     channels: channelsRepo,
+    configs: configsRepo,
     discord,
     logger: logger.child({ component: "voice-panel" }),
     botUsername,
