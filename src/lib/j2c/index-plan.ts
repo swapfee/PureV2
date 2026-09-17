@@ -30,6 +30,7 @@ export const MODEL_COLLECTIONS: Readonly<Record<string, string>> = {
   GuildConfig: "guild_configs",
   TemporaryChannel: "temporary_channels",
   CreationReservation: "creation_reservations",
+  OwnerBlockList: "owner_block_lists",
 };
 
 export function buildIndexCreateOptions(spec: RequiredIndexSpec): {

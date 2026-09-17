@@ -14,6 +14,7 @@ import { createLogger } from "../lib/logger.ts";
 import { listJ2cIndexes } from "../models/index-sync.ts";
 import { CreationReservationModel } from "../models/creation-reservation.ts";
 import { GuildConfigModel } from "../models/guild-config.ts";
+import { OwnerBlockListModel } from "../models/owner-block-list.ts";
 import { TemporaryChannelModel } from "../models/temporary-channel.ts";
 
 async function createMissingIndex(
@@ -52,6 +53,9 @@ async function createMissingIndex(
       return;
     case "CreationReservation":
       await CreationReservationModel.collection.createIndex(keyDoc, createOptions);
+      return;
+    case "OwnerBlockList":
+      await OwnerBlockListModel.collection.createIndex(keyDoc, createOptions);
       return;
     default:
       throw new Error(`Unknown model ${modelName}`);
