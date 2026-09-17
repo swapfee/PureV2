@@ -122,7 +122,7 @@ export async function authorizeVcConnectedMember(input: {
 export function vcAuthUserMessage(reason: VcAuthFailure): string {
   const messages: Record<VcAuthFailure, string> = {
     dm_not_allowed: "This command can only be used in a server.",
-    not_owner: "Only the channel owner can use this command.",
+    not_owner: "Only the owner of this voice channel can manage it.",
     channel_missing: "Your temporary channel no longer exists.",
     not_in_managed_channel: "You must be connected to a managed voice channel.",
     voice_lookup_failed: "Unable to verify your voice state. Please try again.",

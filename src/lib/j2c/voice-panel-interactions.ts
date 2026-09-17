@@ -54,6 +54,13 @@ const OWNER_ACTIONS = new Set<VoicePanelAction>([
   "delete",
 ]);
 
+/** Shown when a non-owner (including another VC owner) tries to use panel controls. */
+const PANEL_OWNER_ONLY_MESSAGE =
+  "Only the owner of this voice channel can manage it.";
+/** Shown when the owner uses their panel while connected elsewhere. */
+const PANEL_OWNER_CONNECT_MESSAGE =
+  "Connect to your voice channel to manage it.";
+
 interface InteractionReplyState {
   deferred: boolean;
   answered: boolean;
@@ -114,6 +121,33 @@ async function deferUpdate(
   replyState.deferred = true;
 }
 
+async function panelAccessDeniedReason(options: {
+  readonly guildId: string;
+  readonly userId: string;
+  readonly channelId: string;
+  readonly record:
+    | NonNullable<Awaited<ReturnType<TemporaryChannelRepository["findByChannelId"]>>>
+    | undefined;
+  readonly channels: TemporaryChannelRepository;
+}): Promise<string> {
+  const { record } = options;
+  if (record && record.status === "active" && record.guildId === options.guildId) {
+    if (record.ownerId === options.userId) {
+      return PANEL_OWNER_CONNECT_MESSAGE;
+    }
+    return PANEL_OWNER_ONLY_MESSAGE;
+  }
+
+  const owned = await options.channels.findActiveOrCreatingByOwner(
+    options.guildId,
+    options.userId,
+  );
+  if (owned && owned.channelId !== options.channelId) {
+    return PANEL_OWNER_ONLY_MESSAGE;
+  }
+  return "You must be connected to this voice channel to use its controls.";
+}
+
 async function requireManagedConnected(options: {
   readonly interaction: InteractionCreatePayload;
   readonly channels: TemporaryChannelRepository;
@@ -127,8 +161,20 @@ async function requireManagedConnected(options: {
   if (!interaction.guildId) {
     return { ok: false, reason: "This command can only be used in a server." };
   }
+
+  const record = await options.channels.findByChannelId(channelId);
+
   if (interaction.channelId !== channelId) {
-    return { ok: false, reason: "Use this control inside the managed voice channel." };
+    return {
+      ok: false,
+      reason: await panelAccessDeniedReason({
+        guildId: interaction.guildId,
+        userId: interaction.userId,
+        channelId,
+        record,
+        channels: options.channels,
+      }),
+    };
   }
 
   const channel = await options.discord.getChannel({ channelId });
@@ -141,10 +187,18 @@ async function requireManagedConnected(options: {
     userId: interaction.userId,
   });
   if (voice.kind !== "found" || voice.value.channelId !== channelId) {
-    return { ok: false, reason: "You must be connected to a managed voice channel." };
+    return {
+      ok: false,
+      reason: await panelAccessDeniedReason({
+        guildId: interaction.guildId,
+        userId: interaction.userId,
+        channelId,
+        record,
+        channels: options.channels,
+      }),
+    };
   }
 
-  const record = await options.channels.findByChannelId(channelId);
   if (!record || record.status !== "active" || record.guildId !== interaction.guildId) {
     return { ok: false, reason: "You must be connected to a managed voice channel." };
   }
@@ -304,7 +358,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("You must own this voice channel to use its controls."),
+        failureResponse(PANEL_OWNER_ONLY_MESSAGE),
       );
       return;
     }
@@ -343,7 +397,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("You must own this voice channel to use its controls."),
+      failureResponse(PANEL_OWNER_ONLY_MESSAGE),
     );
     return;
   }
@@ -636,7 +690,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("You must own this voice channel to use its controls."),
+      failureResponse(PANEL_OWNER_ONLY_MESSAGE),
     );
     return;
   }
@@ -772,7 +826,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(access.ok ? "You must own this voice channel to use its controls." : access.reason).embeds,
+      embeds: failureResponse(access.ok ? PANEL_OWNER_ONLY_MESSAGE : access.reason).embeds,
       components: [],
     });
     return;
@@ -1142,7 +1196,7 @@ async function handleDeleteConfirm(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(access.ok ? "You must own this voice channel to use its controls." : access.reason).embeds,
+      embeds: failureResponse(access.ok ? PANEL_OWNER_ONLY_MESSAGE : access.reason).embeds,
       components: [],
     });
     input.replyState.answered = true;

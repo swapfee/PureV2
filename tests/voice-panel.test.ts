@@ -248,7 +248,141 @@ describe("voice panel interactions", () => {
 
     expect(controls.deferredInteractions).toContain("500000000000000001");
     const reply = controls.editedInteractions.at(-1);
-    expect(reply?.embeds?.[0]?.description).toContain("You must own this voice channel");
+    expect(reply?.embeds?.[0]?.description).toContain(
+      "Only the owner of this voice channel can manage it",
+    );
+  });
+
+  test("refuses another VC owner using a different managed panel", async () => {
+    const otherOwnerId = "666666666666666666";
+    const otherChannelId = "555555555555555555";
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    await channels.create({
+      guildId,
+      channelId: otherChannelId,
+      ownerId: otherOwnerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-2",
+      creationRequestId: "req-2",
+      occupantIds: [otherOwnerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "owner-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+        [
+          otherChannelId,
+          {
+            id: otherChannelId,
+            name: "other-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    // Owner stays in their own VC while pressing the other owner's panel.
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        userId: ownerId,
+        channelId: otherChannelId,
+        customId: `${VOICE_PANEL_PREFIX}:lock:${otherChannelId}:${otherOwnerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "Only the owner of this voice channel can manage it",
+    );
+    const other = await channels.findByChannelId(otherChannelId);
+    expect(other?.locked).toBe(false);
+  });
+
+  test("tells owners to connect when using their own panel from elsewhere", async () => {
+    const otherChannelId = "555555555555555555";
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "owner-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+        [
+          otherChannelId,
+          {
+            id: otherChannelId,
+            name: "elsewhere",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, otherChannelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        userId: ownerId,
+        channelId,
+        customId: `${VOICE_PANEL_PREFIX}:lock:${channelId}:${ownerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "Connect to your voice channel to manage it",
+    );
   });
 
   test("locks channel for the owner", async () => {
@@ -879,7 +1013,7 @@ describe("voice panel access gates", () => {
 
     expect(controls.deferredUpdates).toContain("500000000000000001");
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
-      "You must own this voice channel",
+      "Only the owner of this voice channel can manage it",
     );
   });
 

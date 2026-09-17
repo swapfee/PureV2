@@ -179,6 +179,43 @@ describe("/vc command family", () => {
     expect(metrics.snapshot().authorizationFailures).toBeGreaterThanOrEqual(2);
   });
 
+  test("refuses owner commands in another managed voice channel", async () => {
+    const otherOwnerId = "666666666666666666";
+    const otherChannelId = "555555555555555555";
+    const { vc, controls, metrics, channels } = await setup();
+    await channels.create({
+      guildId,
+      channelId: otherChannelId,
+      ownerId: otherOwnerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-2",
+      creationRequestId: "req-2",
+      occupantIds: [otherOwnerId, ownerId],
+    });
+    controls.channels.set(otherChannelId, {
+      id: otherChannelId,
+      name: "other-room",
+      guildId,
+      permissionOverwrites: [],
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, otherChannelId);
+
+    await vc.execute(
+      interaction({
+        guildId,
+        options: [{ name: "lock", type: 1 }],
+      }),
+    );
+
+    expect(embedText(controls.editedInteractions.at(-1))).toContain(
+      "Only the owner of this voice channel can manage it",
+    );
+    expect(metrics.snapshot().authorizationFailures).toBe(1);
+    const other = await channels.findByChannelId(otherChannelId);
+    expect(other?.locked).toBe(false);
+  });
+
   test("rejects when Discord channel is missing", async () => {
     const { vc, controls, metrics } = await setup();
     controls.missingChannels.add(channelId);
