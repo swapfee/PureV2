@@ -14,7 +14,7 @@ import type { Logger } from "../logger.ts";
 import { createDiscordenoLogger } from "../logger.ts";
 
 /** Shown as the bot's Discord custom status while connected. */
-export const BOT_CUSTOM_STATUS = "PureV2 · early beta";
+export const BOT_CUSTOM_STATUS = "Pure · early beta";
 
 function botPresence(): BotStatusUpdate {
   return {
