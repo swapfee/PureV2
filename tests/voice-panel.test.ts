@@ -9,7 +9,6 @@ import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 import {
   buildVoiceControlPanelComponents,
   IS_COMPONENTS_V2,
-  OWNER_TRANSFER_GRACE_MS,
   PANEL_EMOJIS,
   VOICE_PANEL_PREFIX,
   VOICE_PANEL_VERSION,
@@ -353,7 +352,7 @@ describe("voice panel interactions", () => {
     expect(controls.modals[0]?.title).toBe("Rename Voice Channel");
   });
 
-  test("claim waits for grace period then succeeds", async () => {
+  test("claim succeeds immediately when the owner is not connected", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({
       guildId,
@@ -365,7 +364,6 @@ describe("voice panel interactions", () => {
       creationRequestId: "req-1",
       occupantIds: [memberId],
     });
-    await channels.setOwnerAbsentSince(channelId, new Date(Date.now() - 60_000));
 
     const { discord, controls } = createFakeDiscord({
       currentUser: { id: botId, username: "Pure" },
@@ -398,21 +396,6 @@ describe("voice panel interactions", () => {
 
     await handler.execute(
       interaction({
-        userId: memberId,
-        customId: `${VOICE_PANEL_PREFIX}:claim:${channelId}:${ownerId}`,
-      }),
-    );
-    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
-      "You can claim ownership",
-    );
-
-    await channels.setOwnerAbsentSince(
-      channelId,
-      new Date(Date.now() - OWNER_TRANSFER_GRACE_MS - 1_000),
-    );
-    await handler.execute(
-      interaction({
-        id: "500000000000000002",
         userId: memberId,
         customId: `${VOICE_PANEL_PREFIX}:claim:${channelId}:${ownerId}`,
       }),

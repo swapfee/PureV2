@@ -23,7 +23,6 @@ export const VOICE_MODAL_PREFIX = "voice-modal";
 export const VOICE_SELECT_PREFIX = "voice-select";
 export const VOICE_DELETE_PREFIX = "voice-delete";
 export const VOICE_PANEL_VERSION = 3;
-export const OWNER_TRANSFER_GRACE_MS = 5 * 60_000;
 export const IS_COMPONENTS_V2 = 1 << 15;
 
 export type VoicePanelAction =

@@ -10,7 +10,6 @@ import {
   buildLimitModal,
   buildRenameModal,
   buildTransferSelect,
-  OWNER_TRANSFER_GRACE_MS,
   parseColonId,
   VOICE_DELETE_PREFIX,
   VOICE_MODAL_PREFIX,
@@ -483,27 +482,6 @@ async function handlePanelButton(input: {
       input.interaction,
       input.replyState,
         failureResponse("The owner is still connected to this channel."),
-      );
-      return;
-    }
-    const absentSince = access.record.ownerAbsentSince?.getTime();
-    if (absentSince === undefined) {
-      await replyEphemeral(
-      input.discord,
-      input.interaction,
-      input.replyState,
-        failureResponse("Ownership is not available to claim yet."),
-      );
-      return;
-    }
-    const remaining = OWNER_TRANSFER_GRACE_MS - (Date.now() - absentSince);
-    if (remaining > 0) {
-      const minutes = Math.max(1, Math.ceil(remaining / 60_000));
-      await replyEphemeral(
-      input.discord,
-      input.interaction,
-      input.replyState,
-        failureResponse(`You can claim ownership in about ${minutes} minute${minutes === 1 ? "" : "s"}.`),
       );
       return;
     }

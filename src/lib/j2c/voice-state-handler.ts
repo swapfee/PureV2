@@ -39,7 +39,7 @@ async function syncOwnerAbsence(
 /**
  * Applies voice-state observations to the occupancy tracker, then routes lobby joins
  * and temporary-channel occupancy changes. Ownership does not transfer when the owner leaves;
- * claim becomes available after the grace period via the voice panel.
+ * another connected member can claim via the voice panel while the owner is absent.
  */
 export function createVoiceStateHandler(options: {
   readonly configs: GuildConfigRepository;
