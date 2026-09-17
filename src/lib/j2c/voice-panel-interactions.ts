@@ -9,9 +9,7 @@ import {
   buildLimitModal,
   buildRenameModal,
   buildTransferSelect,
-  emojiMention,
   OWNER_TRANSFER_GRACE_MS,
-  PANEL_EMOJIS,
   parseColonId,
   VOICE_DELETE_PREFIX,
   VOICE_MODAL_PREFIX,
@@ -322,7 +320,7 @@ async function handlePanelButton(input: {
         embeds: [
           {
             description: [
-              `${emojiMention(PANEL_EMOJIS.info)} Channel Info.`,
+              `Channel Info.`,
               `Owner: <@${access.record.ownerId}>`,
               `Name: \`${channel.value.name ?? "unknown"}\``,
               `User limit: ${channel.value.userLimit === undefined || channel.value.userLimit === 0 ? "Unlimited" : String(channel.value.userLimit)}`,
