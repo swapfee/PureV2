@@ -81,6 +81,23 @@ const vcCommandData: CreateApplicationCommand = {
     },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
+      name: "block",
+      description: "Add a member to your persistent block list",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "unblock",
+      description: "Remove a member from your persistent block list",
+      options: [memberOption],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "block-list",
+      description: "Show your persistent block list for this server",
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
       name: "mute",
       description: "Server mute a member in your temporary channel",
       options: [memberOption],

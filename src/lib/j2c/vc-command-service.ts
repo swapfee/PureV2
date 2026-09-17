@@ -7,7 +7,7 @@ import {
   authorizeVcOwner,
   vcAuthUserMessage,
 } from "./vc-auth.ts";
-import type { TemporaryChannelRepository, GuildConfigRepository } from "./repositories.ts";
+import type { TemporaryChannelRepository, GuildConfigRepository, OwnerBlockListRepository } from "./repositories.ts";
 import type { VcMetrics, VcSubcommand } from "./vc-metrics.ts";
 import {
   channelInviteLink,
@@ -23,6 +23,13 @@ import {
   temporaryChannelVisibilityMatches,
 } from "./voice-controls.ts";
 import { applyOwnerHandoffPresentation } from "./owner-handoff.ts";
+import {
+  blockUser,
+  buildBlockListComponents,
+  formatBlockListPage,
+  unblockUser,
+} from "./block-list-actions.ts";
+import { syncBlocksAfterOwnershipChange } from "./owner-block-sync.ts";
 
 export const VC_COOLDOWNS_MS = {
   invite: 3_000,
@@ -39,6 +46,9 @@ export const VC_COOLDOWNS_MS = {
   transfer: 5_000,
   info: 3_000,
   delete: 10_000,
+  block: 3_000,
+  unblock: 3_000,
+  "block-list": 3_000,
 } as const;
 
 const OWNER_SUBCOMMANDS = new Set<VcSubcommand>([
@@ -57,6 +67,9 @@ const OWNER_SUBCOMMANDS = new Set<VcSubcommand>([
 ]);
 
 const MEMBER_SUBCOMMANDS = new Set<VcSubcommand>(["invite", "info"]);
+
+/** Guild-scoped personal list commands — no temporary channel required. */
+const PERSONAL_SUBCOMMANDS = new Set<VcSubcommand>(["block", "unblock", "block-list"]);
 
 function normalizeChannelName(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
@@ -80,6 +93,9 @@ function isVcSubcommand(value: string): value is VcSubcommand {
     case "transfer":
     case "info":
     case "delete":
+    case "block":
+    case "unblock":
+    case "block-list":
       return true;
     default:
       return false;
@@ -120,6 +136,7 @@ export interface VcCommandService {
 export function createVcCommandService(options: {
   readonly channels: TemporaryChannelRepository;
   readonly configs?: GuildConfigRepository;
+  readonly blocks?: OwnerBlockListRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly metrics: VcMetrics;
@@ -177,6 +194,146 @@ export function createVcCommandService(options: {
         ephemeral: true,
       });
       const deferred = true;
+
+      if (PERSONAL_SUBCOMMANDS.has(subcommand)) {
+        if (!interaction.guildId) {
+          options.metrics.authorizationFailure();
+          await reply(interaction, deferred, failureResponse("Use this command in a server."));
+          return;
+        }
+        const guildId = interaction.guildId;
+        const cooldownKey = `vc:${subcommand}:${guildId}:${interaction.userId}`;
+        const remainingMs = options.cooldowns.remaining(cooldownKey);
+        if (remainingMs > 0) {
+          options.metrics.cooldownRejection();
+          await reply(
+            interaction,
+            deferred,
+            failureResponse(`Please wait ${Math.ceil(remainingMs / 1000)}s before using this again.`),
+          );
+          return;
+        }
+        if (!options.blocks) {
+          await reply(interaction, deferred, failureResponse("Block list is not ready yet."));
+          return;
+        }
+        const requestId = `vc:${subcommand}:${interaction.id}`;
+        try {
+          if (subcommand === "block" || subcommand === "unblock") {
+            const targetFromOption = optionValue(sub.options, "member");
+            const targetUserId =
+              typeof targetFromOption === "string"
+                ? targetFromOption
+                : interaction.targetUserId;
+            if (typeof targetUserId !== "string") {
+              options.metrics.validationFailure();
+              await reply(
+                interaction,
+                deferred,
+                failureResponse(`Provide a member to ${subcommand}.`),
+              );
+              return;
+            }
+            if (subcommand === "block") {
+              const outcome = await blockUser({
+                blocks: options.blocks,
+                channels: options.channels,
+                discord: options.discord,
+                logger: options.logger,
+                guildId,
+                ownerId: interaction.userId,
+                targetUserId,
+                requestId,
+              });
+              options.cooldowns.touch(cooldownKey, VC_COOLDOWNS_MS.block);
+              if (outcome.kind === "ok") {
+                options.metrics.success("block");
+                await reply(
+                  interaction,
+                  deferred,
+                  successResponse(
+                    outcome.partialSync
+                      ? `<@${targetUserId}> blocked. Some channels need repair.`
+                      : `<@${targetUserId}> blocked.`,
+                  ),
+                );
+                return;
+              }
+              options.metrics.validationFailure();
+              const message =
+                outcome.kind === "cannot_block_self"
+                  ? "You cannot block yourself."
+                  : outcome.kind === "cannot_block_bot"
+                    ? "You cannot block bots."
+                    : outcome.kind === "already_blocked"
+                      ? "That member is already blocked."
+                      : outcome.kind === "limit_reached"
+                        ? "Block list limit reached (50)."
+                        : "Could not look up that user.";
+              await reply(interaction, deferred, failureResponse(message));
+              return;
+            }
+
+            const outcome = await unblockUser({
+              blocks: options.blocks,
+              channels: options.channels,
+              discord: options.discord,
+              logger: options.logger,
+              guildId,
+              ownerId: interaction.userId,
+              targetUserId,
+              requestId,
+            });
+            options.cooldowns.touch(cooldownKey, VC_COOLDOWNS_MS.unblock);
+            if (outcome.kind === "ok") {
+              options.metrics.success("unblock");
+              await reply(
+                interaction,
+                deferred,
+                successResponse(
+                  outcome.partialSync
+                    ? `<@${targetUserId}> unblocked. Some channels need repair.`
+                    : `<@${targetUserId}> unblocked.`,
+                ),
+              );
+              return;
+            }
+            options.metrics.validationFailure();
+            await reply(interaction, deferred, failureResponse("That member is not blocked."));
+            return;
+          }
+
+          if (subcommand === "block-list") {
+            const blockedUserIds = await options.blocks.getBlockedUserIds(guildId, interaction.userId);
+            const page = formatBlockListPage({ blockedUserIds, page: 1 });
+            options.cooldowns.touch(cooldownKey, VC_COOLDOWNS_MS["block-list"]);
+            options.metrics.success("block-list");
+            await options.discord.editInteractionResponse({
+              applicationId: interaction.applicationId,
+              interactionToken: interaction.token,
+              embeds: [{ description: page.description }],
+              components: [
+                ...buildBlockListComponents({
+                  ownerId: interaction.userId,
+                  page: page.page,
+                  hasPrev: page.hasPrev,
+                  hasNext: page.hasNext,
+                }),
+              ],
+            });
+            return;
+          }
+        } catch (error: unknown) {
+          options.logger.error("VC personal command failed", {
+            guildId,
+            userId: interaction.userId,
+            subcommand,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          await reply(interaction, deferred, failureResponse("Something went wrong. Try again shortly."));
+        }
+        return;
+      }
 
       const auth =
         OWNER_SUBCOMMANDS.has(subcommand)
@@ -277,6 +434,21 @@ export function createVcCommandService(options: {
               failureResponse("That member is rejected from this channel."),
             );
             return;
+          }
+          if (options.blocks) {
+            const blocked = await options.blocks.getBlockedUserIds(
+              auth.channel.guildId,
+              auth.channel.ownerId,
+            );
+            if (blocked.includes(targetUserId)) {
+              options.metrics.validationFailure();
+              await reply(
+                interaction,
+                deferred,
+                failureResponse("That member is blocked by this channel's owner."),
+              );
+              return;
+            }
           }
           const target = await options.discord.getUser({ userId: targetUserId });
           if (target.kind !== "found") {
@@ -544,6 +716,21 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(interaction, deferred, failureResponse("You cannot permit bots."));
             return;
+          }
+          if (options.blocks) {
+            const blocked = await options.blocks.getBlockedUserIds(
+              auth.channel.guildId,
+              auth.channel.ownerId,
+            );
+            if (blocked.includes(targetUserId)) {
+              options.metrics.validationFailure();
+              await reply(
+                interaction,
+                deferred,
+                failureResponse(`Remove <@${targetUserId}> with /vc unblock before permitting them.`),
+              );
+              return;
+            }
           }
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
@@ -822,6 +1009,18 @@ export function createVcCommandService(options: {
               ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
               requestId,
             });
+            if (options.blocks) {
+              await syncBlocksAfterOwnershipChange({
+                blocks: options.blocks,
+                channels: options.channels,
+                discord: options.discord,
+                logger: options.logger,
+                guildId: auth.channel.guildId,
+                channelId: auth.channel.channelId,
+                newOwnerId: targetUserId,
+                requestId: `${requestId}:blocks`,
+              });
+            }
           } catch (error) {
             options.logger.warn("VC transfer owner presentation update failed", {
               ...baseLog,

@@ -21,6 +21,8 @@ export interface InteractionCreatePayload {
   /** Modal text inputs or select values. */
   readonly componentValues?: Readonly<Record<string, string>>;
   readonly selectedUserIds?: readonly string[];
+  /** Target user for user-context-menu commands. */
+  readonly targetUserId?: string;
 }
 
 export interface VoiceStateUpdatePayload {

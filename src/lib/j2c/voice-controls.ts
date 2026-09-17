@@ -272,3 +272,227 @@ export async function rejectMember(options: {
 
   return { kind: "ok" };
 }
+
+/**
+ * Deny Connect + ViewChannel for a persistent block (stronger than channel reject).
+ * Preserves unrelated allow/deny bits on the member overwrite.
+ */
+export async function applyPersistentBlockOverwrite(options: {
+  readonly discord: DiscordApiPort;
+  readonly channelId: string;
+  readonly userId: string;
+  readonly requestId: string;
+  readonly reason: string;
+  readonly existing?: PermissionOverwrite;
+}): Promise<DiscordOperationResult> {
+  const allow =
+    parsePermissionBits(options.existing?.allow) & ~(VIEW_CHANNEL | CONNECT);
+  const deny =
+    parsePermissionBits(options.existing?.deny) | VIEW_CHANNEL | CONNECT;
+  return options.discord.editChannelPermissionOverwrite({
+    channelId: options.channelId,
+    overwriteId: options.userId,
+    type: 1,
+    allow: bitsToString(allow),
+    deny: bitsToString(deny),
+    requestId: options.requestId,
+    reason: options.reason,
+  });
+}
+
+/**
+ * Clear block-managed View+Connect denials when the member is no longer blocked.
+ * Keeps Connect denied if the member is still rejected from this channel.
+ */
+export async function clearPersistentBlockOverwrite(options: {
+  readonly discord: DiscordApiPort;
+  readonly channelId: string;
+  readonly userId: string;
+  readonly rejected: boolean;
+  readonly requestId: string;
+  readonly reason: string;
+  readonly existing?: PermissionOverwrite;
+}): Promise<DiscordOperationResult> {
+  if (!options.existing) return { kind: "ok" };
+  let allow = parsePermissionBits(options.existing.allow);
+  let deny = parsePermissionBits(options.existing.deny);
+  // Always clear ViewChannel denial from persistent blocks.
+  deny &= ~VIEW_CHANNEL;
+  if (!options.rejected) {
+    allow &= ~CONNECT;
+    deny &= ~CONNECT;
+  }
+  return options.discord.editChannelPermissionOverwrite({
+    channelId: options.channelId,
+    overwriteId: options.userId,
+    type: 1,
+    allow: bitsToString(allow),
+    deny: bitsToString(deny),
+    requestId: options.requestId,
+    reason: options.reason,
+  });
+}
+
+export async function disconnectIfInChannel(options: {
+  readonly discord: DiscordApiPort;
+  readonly guildId: string;
+  readonly channelId: string;
+  readonly userId: string;
+  readonly requestId: string;
+  readonly reason: string;
+}): Promise<DiscordOperationResult> {
+  const voice = await options.discord.getUserVoiceChannel({
+    guildId: options.guildId,
+    userId: options.userId,
+  });
+  if (voice.kind !== "found" || voice.value.channelId !== options.channelId) {
+    return { kind: "ok" };
+  }
+  return options.discord.moveMemberToChannel({
+    guildId: options.guildId,
+    userId: options.userId,
+    channelId: null,
+    requestId: options.requestId,
+    reason: options.reason,
+  });
+}
+
+/**
+ * Align Discord overwrites for one temporary channel with the owner's persistent
+ * block list while preserving per-channel rejections.
+ */
+export async function synchronizeTemporaryChannelAccess(options: {
+  readonly discord: DiscordApiPort;
+  readonly channels: TemporaryChannelRepository;
+  readonly record: TemporaryChannelRecord;
+  readonly blockedUserIds: readonly string[];
+  readonly requestId: string;
+  readonly reason?: string;
+}): Promise<{ readonly ok: boolean; readonly failedUserIds: readonly string[] }> {
+  const reason = options.reason ?? "owner block list sync";
+  const channel = await options.discord.getChannel({ channelId: options.record.channelId });
+  if (channel.kind !== "found") {
+    return { ok: false, failedUserIds: [...options.blockedUserIds] };
+  }
+
+  // Keep a mutable snapshot so later steps see clears/applies from earlier steps
+  // (getChannel returns a copied overwrite list).
+  const overwrites = new Map<string, PermissionOverwrite>(
+    (channel.value.permissionOverwrites ?? []).map((entry) => [entry.id, { ...entry }]),
+  );
+  const rememberOverwrite = (userId: string, allow: string, deny: string): void => {
+    overwrites.set(userId, { id: userId, type: 1, allow, deny });
+  };
+
+  const blocked = new Set(options.blockedUserIds);
+  const rejected = new Set(options.record.rejectedUserIds);
+  const previouslyApplied = new Set(options.record.appliedBlockUserIds ?? []);
+  const failedUserIds: string[] = [];
+
+  const toClear = [...previouslyApplied].filter((userId) => !blocked.has(userId));
+  for (const userId of toClear) {
+    const existing = overwrites.get(userId);
+    const cleared = await clearPersistentBlockOverwrite({
+      discord: options.discord,
+      channelId: options.record.channelId,
+      userId,
+      rejected: rejected.has(userId),
+      requestId: `${options.requestId}:clear:${userId}`,
+      reason,
+      ...(existing ? { existing } : {}),
+    });
+    if (cleared.kind !== "ok") {
+      failedUserIds.push(userId);
+      continue;
+    }
+    if (!existing) continue;
+    let allow = parsePermissionBits(existing.allow);
+    let deny = parsePermissionBits(existing.deny);
+    deny &= ~VIEW_CHANNEL;
+    if (!rejected.has(userId)) {
+      allow &= ~CONNECT;
+      deny &= ~CONNECT;
+    }
+    rememberOverwrite(userId, bitsToString(allow), bitsToString(deny));
+  }
+
+  for (const userId of blocked) {
+    if (userId === options.record.ownerId) continue;
+    const existing = overwrites.get(userId);
+    const applied = await applyPersistentBlockOverwrite({
+      discord: options.discord,
+      channelId: options.record.channelId,
+      userId,
+      requestId: `${options.requestId}:block:${userId}`,
+      reason,
+      ...(existing ? { existing } : {}),
+    });
+    if (applied.kind !== "ok") {
+      failedUserIds.push(userId);
+      continue;
+    }
+    const allow =
+      parsePermissionBits(existing?.allow) & ~(VIEW_CHANNEL | CONNECT);
+    const deny =
+      parsePermissionBits(existing?.deny) | VIEW_CHANNEL | CONNECT;
+    rememberOverwrite(userId, bitsToString(allow), bitsToString(deny));
+    const disconnected = await disconnectIfInChannel({
+      discord: options.discord,
+      guildId: options.record.guildId,
+      channelId: options.record.channelId,
+      userId,
+      requestId: `${options.requestId}:kick:${userId}`,
+      reason,
+    });
+    if (disconnected.kind !== "ok") failedUserIds.push(userId);
+  }
+
+  // Ensure rejected members who are not persistently blocked still have Connect denied.
+  for (const userId of rejected) {
+    if (blocked.has(userId) || userId === options.record.ownerId) continue;
+    const existing = overwrites.get(userId);
+    const allow = parsePermissionBits(existing?.allow) & ~CONNECT;
+    const deny = parsePermissionBits(existing?.deny) | CONNECT;
+    const result = await options.discord.editChannelPermissionOverwrite({
+      channelId: options.record.channelId,
+      overwriteId: userId,
+      type: 1,
+      allow: bitsToString(allow),
+      deny: bitsToString(deny),
+      requestId: `${options.requestId}:reject:${userId}`,
+      reason,
+    });
+    if (result.kind !== "ok") failedUserIds.push(userId);
+    else rememberOverwrite(userId, bitsToString(allow), bitsToString(deny));
+  }
+
+  await options.channels.setAppliedBlockUserIds(options.record.channelId, [...blocked]);
+  return { ok: failedUserIds.length === 0, failedUserIds };
+}
+
+export async function synchronizeOwnedChannelBlockLists(options: {
+  readonly discord: DiscordApiPort;
+  readonly channels: TemporaryChannelRepository;
+  readonly guildId: string;
+  readonly ownerId: string;
+  readonly blockedUserIds: readonly string[];
+  readonly requestId: string;
+  readonly reason?: string;
+}): Promise<{ readonly synced: number; readonly failedChannelIds: readonly string[] }> {
+  const owned = await options.channels.listActiveOwned(options.guildId, options.ownerId);
+  const failedChannelIds: string[] = [];
+  let synced = 0;
+  for (const record of owned) {
+    const result = await synchronizeTemporaryChannelAccess({
+      discord: options.discord,
+      channels: options.channels,
+      record,
+      blockedUserIds: options.blockedUserIds,
+      requestId: `${options.requestId}:${record.channelId}`,
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+    });
+    if (result.ok) synced += 1;
+    else failedChannelIds.push(record.channelId);
+  }
+  return { synced, failedChannelIds };
+}

@@ -1,6 +1,11 @@
 import { CreationReservationModel, type CreationReservationRecord } from "../../models/creation-reservation.ts";
 import { GuildConfigModel, type GuildConfigRecord, type UpsertGuildConfigInput } from "../../models/guild-config.ts";
 import {
+  OWNER_BLOCK_LIST_MAX,
+  OwnerBlockListModel,
+  type OwnerBlockListRecord,
+} from "../../models/owner-block-list.ts";
+import {
   TemporaryChannelModel,
   type TemporaryChannelRecord,
   type TemporaryChannelStatus,
@@ -12,6 +17,7 @@ import type {
   CreateTemporaryChannelInput,
   CreationReservationRepository,
   GuildConfigRepository,
+  OwnerBlockListRepository,
   TemporaryChannelRepository,
 } from "./repositories.ts";
 
@@ -52,6 +58,7 @@ function toTempRecord(doc: {
   occupantIds: string[];
   locked?: boolean | null;
   rejectedUserIds?: string[] | null;
+  appliedBlockUserIds?: string[] | null;
   ownerAbsentSince?: Date | null;
   panelMessageId?: string | null;
   panelVersion?: number | null;
@@ -74,6 +81,7 @@ function toTempRecord(doc: {
     occupantIds: [...doc.occupantIds],
     locked: doc.locked === true,
     rejectedUserIds: [...(doc.rejectedUserIds ?? [])],
+    appliedBlockUserIds: [...(doc.appliedBlockUserIds ?? [])],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
     ...(doc.emptySince ? { emptySince: doc.emptySince } : {}),
@@ -176,6 +184,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         occupantIds: [...(input.occupantIds ?? [])],
         locked: false,
         rejectedUserIds: [],
+        appliedBlockUserIds: [...(input.appliedBlockUserIds ?? [])],
       });
       return toTempRecord(doc.toObject());
     },
@@ -216,6 +225,13 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
 
     async listActiveByGuild(guildId) {
       const docs = await TemporaryChannelModel.find({ guildId, status: "active" }).lean().exec();
+      return docs.map(toTempRecord);
+    },
+
+    async listActiveOwned(guildId, ownerId) {
+      const docs = await TemporaryChannelModel.find({ guildId, ownerId, status: "active" })
+        .lean()
+        .exec();
       return docs.map(toTempRecord);
     },
 
@@ -307,6 +323,17 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         { channelId, status: "active" },
         { $pull: { rejectedUserIds: userId } },
         { returnDocument: 'after' },
+      )
+        .lean()
+        .exec();
+      return doc ? toTempRecord(doc) : undefined;
+    },
+
+    async setAppliedBlockUserIds(channelId, appliedBlockUserIds) {
+      const doc = await TemporaryChannelModel.findOneAndUpdate(
+        { channelId, status: { $in: ["creating", "active"] } },
+        { $set: { appliedBlockUserIds: [...appliedBlockUserIds] } },
+        { returnDocument: "after" },
       )
         .lean()
         .exec();
@@ -474,6 +501,94 @@ export function createMongooseCreationReservationRepository(): CreationReservati
     async listByStatus(status) {
       const docs = await CreationReservationModel.find({ status }).lean().exec();
       return docs.map(toReservationRecord);
+    },
+  };
+}
+
+function toOwnerBlockListRecord(doc: {
+  guildId: string;
+  ownerId: string;
+  blockedUserIds: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}): OwnerBlockListRecord {
+  return {
+    guildId: doc.guildId,
+    ownerId: doc.ownerId,
+    blockedUserIds: [...doc.blockedUserIds],
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+export function createMongooseOwnerBlockListRepository(): OwnerBlockListRepository {
+  return {
+    async getBlockedUserIds(guildId, ownerId) {
+      const doc = await OwnerBlockListModel.findOne({ guildId, ownerId }).lean().exec();
+      return [...(doc?.blockedUserIds ?? [])];
+    },
+
+    async findByOwner(guildId, ownerId) {
+      const doc = await OwnerBlockListModel.findOne({ guildId, ownerId }).lean().exec();
+      return doc ? toOwnerBlockListRecord(doc) : undefined;
+    },
+
+    async addBlockedUser(guildId, ownerId, blockedUserId) {
+      const existing = await OwnerBlockListModel.findOne({ guildId, ownerId }).lean().exec();
+      const current = existing?.blockedUserIds ?? [];
+      if (current.includes(blockedUserId)) {
+        return { outcome: "exists", blockedUserIds: [...current] };
+      }
+      if (current.length >= OWNER_BLOCK_LIST_MAX) {
+        return { outcome: "limit", blockedUserIds: [...current] };
+      }
+
+      const doc = await OwnerBlockListModel.findOneAndUpdate(
+        { guildId, ownerId },
+        {
+          $addToSet: { blockedUserIds: blockedUserId },
+          $setOnInsert: { guildId, ownerId },
+        },
+        { upsert: true, returnDocument: "after" },
+      )
+        .lean()
+        .exec();
+
+      const blockedUserIds = [...(doc?.blockedUserIds ?? [...current, blockedUserId])];
+      if (blockedUserIds.length > OWNER_BLOCK_LIST_MAX) {
+        // Rare race: trim the extra id and report limit.
+        await OwnerBlockListModel.updateOne(
+          { guildId, ownerId },
+          { $pull: { blockedUserIds: blockedUserId } },
+        ).exec();
+        return {
+          outcome: "limit",
+          blockedUserIds: blockedUserIds.filter((id) => id !== blockedUserId).slice(0, OWNER_BLOCK_LIST_MAX),
+        };
+      }
+      return { outcome: "added", blockedUserIds };
+    },
+
+    async removeBlockedUser(guildId, ownerId, blockedUserId) {
+      const existing = await OwnerBlockListModel.findOne({ guildId, ownerId }).lean().exec();
+      const current = existing?.blockedUserIds ?? [];
+      if (!current.includes(blockedUserId)) {
+        return { outcome: "missing", blockedUserIds: [...current] };
+      }
+
+      const doc = await OwnerBlockListModel.findOneAndUpdate(
+        { guildId, ownerId },
+        { $pull: { blockedUserIds: blockedUserId } },
+        { returnDocument: "after" },
+      )
+        .lean()
+        .exec();
+
+      const blockedUserIds = [...(doc?.blockedUserIds ?? [])];
+      if (doc && blockedUserIds.length === 0) {
+        await OwnerBlockListModel.deleteOne({ guildId, ownerId }).exec();
+      }
+      return { outcome: "removed", blockedUserIds };
     },
   };
 }

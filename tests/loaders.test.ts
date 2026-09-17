@@ -74,6 +74,20 @@ describe("loadCommandModules", () => {
       expect(registry.has("echo")).toBe(true);
     });
   });
+
+  test("loads user context menu commands without descriptions", async () => {
+    await withTempDir(async (directory) => {
+      await writeFile(
+        join(directory, "block-from-vc.command.ts"),
+        `export default {
+          data: { name: "Block from VC", type: 2 },
+          async execute() {}
+        };`,
+      );
+      const registry = await loadCommandModules(directory);
+      expect(registry.get("Block from VC")?.data.type).toBe(2);
+    });
+  });
 });
 
 describe("loadEventModules", () => {

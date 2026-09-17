@@ -13,6 +13,7 @@ import { createJ2cMetrics, type J2cMetrics } from "../j2c/metrics.ts";
 import {
   createMongooseCreationReservationRepository,
   createMongooseGuildConfigRepository,
+  createMongooseOwnerBlockListRepository,
   createMongooseTemporaryChannelRepository,
 } from "../j2c/mongoose-repositories.ts";
 import { createRestManagerDiscordPort } from "../j2c/rest-discord-port.ts";
@@ -295,12 +296,14 @@ export function createCoordinatorRuntime(
         const {
           createMemoryCreationReservationRepository,
           createMemoryGuildConfigRepository,
+          createMemoryOwnerBlockListRepository,
           createMemoryTemporaryChannelRepository,
         } = await import("../j2c/memory-repositories.ts");
         j2cRuntime = createJ2cRuntime({
           configs: createMemoryGuildConfigRepository(),
           channels: createMemoryTemporaryChannelRepository(),
           reservations: createMemoryCreationReservationRepository(),
+          blocks: createMemoryOwnerBlockListRepository(),
           discord: createRestManagerDiscordPort(rest.rest),
           logger: logger.child({ component: "j2c" }),
           metrics: j2cMetrics,
@@ -314,6 +317,7 @@ export function createCoordinatorRuntime(
           configs: createMongooseGuildConfigRepository(),
           channels: createMongooseTemporaryChannelRepository(),
           reservations: createMongooseCreationReservationRepository(),
+          blocks: createMongooseOwnerBlockListRepository(),
           discord: createRestManagerDiscordPort(rest.rest),
           logger: logger.child({ component: "j2c" }),
           metrics: j2cMetrics,

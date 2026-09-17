@@ -1,5 +1,6 @@
 import { CreationReservationModel } from "./creation-reservation.ts";
 import { GuildConfigModel } from "./guild-config.ts";
+import { OwnerBlockListModel } from "./owner-block-list.ts";
 import { TemporaryChannelModel } from "./temporary-channel.ts";
 
 export interface IndexSyncResult {
@@ -31,6 +32,7 @@ const defaultModels: readonly IndexableModel[] = [
   GuildConfigModel,
   TemporaryChannelModel,
   CreationReservationModel,
+  OwnerBlockListModel,
 ];
 
 /**

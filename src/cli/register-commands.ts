@@ -95,11 +95,14 @@ export function validateCommandBodies(
     if (!module.data.name || module.data.name !== name) {
       throw new Error(`Command module key/name mismatch for ${name}`);
     }
+    const commandType =
+      "type" in module.data && typeof module.data.type === "number" ? module.data.type : 1;
     const description =
       "description" in module.data && typeof module.data.description === "string"
         ? module.data.description
         : undefined;
-    if (!description || description.trim().length === 0) {
+    // Chat input requires a description; USER/MESSAGE context menus do not.
+    if (commandType === 1 && (!description || description.trim().length === 0)) {
       throw new Error(`Command ${name} is missing a description`);
     }
     bodies.push(module.data);

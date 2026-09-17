@@ -15,10 +15,46 @@ import type { RuntimeEventName } from "../lib/runtime-types.ts";
 
 const commandDataSchema = z
   .object({
-    name: z.string().min(1).max(32).regex(/^[-_a-z0-9]+$/),
-    description: z.string().min(1).max(100),
+    name: z.string().min(1).max(32),
+    description: z.string().min(1).max(100).optional(),
     type: z.number().int().optional(),
     options: z.array(z.unknown()).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const commandType = value.type ?? 1; // ChatInput default
+    if (commandType === 1) {
+      if (!value.description || value.description.trim().length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Chat input commands require a description",
+          path: ["description"],
+        });
+      }
+      if (!/^[-_a-z0-9]{1,32}$/.test(value.name)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Chat input command names must be lowercase kebab/snake case",
+          path: ["name"],
+        });
+      }
+      return;
+    }
+    if (commandType === 2 || commandType === 3) {
+      // USER / MESSAGE context menus: name may include spaces and mixed case.
+      if (value.name.trim().length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Context menu command names cannot be empty",
+          path: ["name"],
+        });
+      }
+      return;
+    }
+    ctx.addIssue({
+      code: "custom",
+      message: `Unsupported application command type ${commandType}`,
+      path: ["type"],
+    });
   })
   .loose();
 

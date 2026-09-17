@@ -4,6 +4,8 @@ export type { TemporaryChannelRecord, TemporaryChannelStatus } from "./temporary
 export { TemporaryChannelModel, TEMPORARY_CHANNEL_STATUSES } from "./temporary-channel.ts";
 export type { CreationReservationRecord, ReservationStatus } from "./creation-reservation.ts";
 export { CreationReservationModel, RESERVATION_STATUSES } from "./creation-reservation.ts";
+export type { OwnerBlockListRecord } from "./owner-block-list.ts";
+export { OwnerBlockListModel, OWNER_BLOCK_LIST_MAX } from "./owner-block-list.ts";
 export { synchronizeJ2cIndexes, listJ2cIndexes, verifyJ2cIndexes } from "./index-sync.ts";
 export type { IndexListingResult, ListedMongoIndex } from "./index-sync.ts";
 export {

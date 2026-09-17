@@ -10,11 +10,13 @@ import { createJ2cMetrics } from "../j2c/metrics.ts";
 import {
   createMongooseCreationReservationRepository,
   createMongooseGuildConfigRepository,
+  createMongooseOwnerBlockListRepository,
   createMongooseTemporaryChannelRepository,
 } from "../j2c/mongoose-repositories.ts";
 import {
   createMemoryCreationReservationRepository,
   createMemoryGuildConfigRepository,
+  createMemoryOwnerBlockListRepository,
   createMemoryTemporaryChannelRepository,
 } from "../j2c/memory-repositories.ts";
 import { createJ2cRuntime } from "../j2c/runtime.ts";
@@ -71,11 +73,16 @@ export async function runWorkerMain(): Promise<void> {
     config.NODE_ENV === "test"
       ? createMemoryCreationReservationRepository()
       : createMongooseCreationReservationRepository();
+  const blocksRepo =
+    config.NODE_ENV === "test"
+      ? createMemoryOwnerBlockListRepository()
+      : createMongooseOwnerBlockListRepository();
 
   const j2c = createJ2cRuntime({
     configs: configsRepo,
     channels: channelsRepo,
     reservations: reservationsRepo,
+    blocks: blocksRepo,
     discord,
     logger: logger.child({ component: "j2c" }),
     metrics: j2cMetrics,
@@ -89,6 +96,7 @@ export async function runWorkerMain(): Promise<void> {
   const vc = createVcCommandService({
     channels: channelsRepo,
     configs: configsRepo,
+    blocks: blocksRepo,
     discord,
     logger: logger.child({ component: "vc" }),
     metrics: createVcMetrics(),
@@ -108,6 +116,7 @@ export async function runWorkerMain(): Promise<void> {
   const voicePanel = createVoicePanelInteractionHandler({
     channels: channelsRepo,
     configs: configsRepo,
+    blocks: blocksRepo,
     discord,
     logger: logger.child({ component: "voice-panel" }),
     botUsername,

@@ -70,6 +70,13 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       keys: { eventId: 1 },
     },
   ],
+  OwnerBlockList: [
+    {
+      name: "owner_block_lists_guild_owner_unique",
+      keys: { guildId: 1, ownerId: 1 },
+      unique: true,
+    },
+  ],
 };
 
 export interface IndexVerificationIssue {
@@ -222,6 +229,7 @@ export const REQUIRED_J2C_INDEX_NAMES = {
   GuildConfig: (REQUIRED_J2C_INDEX_SPECS.GuildConfig ?? []).map((spec) => spec.name),
   TemporaryChannel: (REQUIRED_J2C_INDEX_SPECS.TemporaryChannel ?? []).map((spec) => spec.name),
   CreationReservation: (REQUIRED_J2C_INDEX_SPECS.CreationReservation ?? []).map((spec) => spec.name),
+  OwnerBlockList: (REQUIRED_J2C_INDEX_SPECS.OwnerBlockList ?? []).map((spec) => spec.name),
 } as const;
 
 /** @deprecated Prefer verifyRequiredIndexSpecs */

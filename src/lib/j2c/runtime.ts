@@ -6,6 +6,7 @@ import { createJ2cMetrics, type J2cMetrics, type J2cMetricsSnapshot } from "./me
 import type {
   CreationReservationRepository,
   GuildConfigRepository,
+  OwnerBlockListRepository,
   TemporaryChannelRepository,
 } from "./repositories.ts";
 import { createOwnershipService, type OwnershipService } from "./ownership.ts";
@@ -72,6 +73,7 @@ export function createJ2cRuntime(options: {
   readonly reconcileConcurrency?: number;
   readonly metrics?: J2cMetrics;
   readonly occupancy?: VoiceOccupancyTracker;
+  readonly blocks?: OwnerBlockListRepository;
 }): J2cRuntime {
   const metrics = options.metrics ?? createJ2cMetrics();
   const occupancy = options.occupancy ?? createVoiceOccupancyTracker();
@@ -90,6 +92,7 @@ export function createJ2cRuntime(options: {
     discord: options.discord,
     metrics,
     logger: options.logger,
+    ...(options.blocks ? { blocks: options.blocks } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });
   const deletion = createDeletionLifecycle({

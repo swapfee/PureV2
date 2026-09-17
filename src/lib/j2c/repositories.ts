@@ -1,5 +1,6 @@
 import type { CreationReservationRecord, ReservationStatus } from "../../models/creation-reservation.ts";
 import type { GuildConfigRecord, UpsertGuildConfigInput } from "../../models/guild-config.ts";
+import type { OwnerBlockListRecord } from "../../models/owner-block-list.ts";
 import type { TemporaryChannelRecord, TemporaryChannelStatus } from "../../models/temporary-channel.ts";
 
 export interface GuildConfigRepository {
@@ -17,6 +18,7 @@ export interface CreateTemporaryChannelInput {
   readonly reservationId: string;
   readonly creationRequestId: string;
   readonly occupantIds?: readonly string[];
+  readonly appliedBlockUserIds?: readonly string[];
 }
 
 export interface TemporaryChannelRepository {
@@ -28,6 +30,7 @@ export interface TemporaryChannelRepository {
   listByStatus(statuses: readonly TemporaryChannelStatus[]): Promise<readonly TemporaryChannelRecord[]>;
   listActiveByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
   listByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
+  listActiveOwned(guildId: string, ownerId: string): Promise<readonly TemporaryChannelRecord[]>;
   countByStatus(status: TemporaryChannelStatus): Promise<number>;
   markActive(channelId: string, occupantIds: readonly string[]): Promise<TemporaryChannelRecord | undefined>;
   setOccupants(
@@ -44,6 +47,10 @@ export interface TemporaryChannelRepository {
   setLocked(channelId: string, locked: boolean): Promise<TemporaryChannelRecord | undefined>;
   addRejectedUser(channelId: string, userId: string): Promise<TemporaryChannelRecord | undefined>;
   removeRejectedUser(channelId: string, userId: string): Promise<TemporaryChannelRecord | undefined>;
+  setAppliedBlockUserIds(
+    channelId: string,
+    appliedBlockUserIds: readonly string[],
+  ): Promise<TemporaryChannelRecord | undefined>;
   transferOwner(
     channelId: string,
     newOwnerId: string,
@@ -59,6 +66,26 @@ export interface TemporaryChannelRepository {
     panelOwnerId: string,
   ): Promise<TemporaryChannelRecord | undefined>;
   remove(channelId: string): Promise<boolean>;
+}
+
+export type AddBlockedUserResult =
+  | { readonly outcome: "added"; readonly blockedUserIds: readonly string[] }
+  | { readonly outcome: "exists"; readonly blockedUserIds: readonly string[] }
+  | { readonly outcome: "limit"; readonly blockedUserIds: readonly string[] };
+
+export type RemoveBlockedUserResult =
+  | { readonly outcome: "removed"; readonly blockedUserIds: readonly string[] }
+  | { readonly outcome: "missing"; readonly blockedUserIds: readonly string[] };
+
+export interface OwnerBlockListRepository {
+  getBlockedUserIds(guildId: string, ownerId: string): Promise<readonly string[]>;
+  findByOwner(guildId: string, ownerId: string): Promise<OwnerBlockListRecord | undefined>;
+  addBlockedUser(guildId: string, ownerId: string, blockedUserId: string): Promise<AddBlockedUserResult>;
+  removeBlockedUser(
+    guildId: string,
+    ownerId: string,
+    blockedUserId: string,
+  ): Promise<RemoveBlockedUserResult>;
 }
 
 export interface AcquireReservationInput {

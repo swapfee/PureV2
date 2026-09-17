@@ -13,7 +13,10 @@ export type VcSubcommand =
   | "unmute"
   | "transfer"
   | "info"
-  | "delete";
+  | "delete"
+  | "block"
+  | "unblock"
+  | "block-list";
 
 export interface VcMetricsSnapshot {
   readonly attempts: Readonly<Record<VcSubcommand, number>>;
@@ -52,6 +55,9 @@ function emptySubcounts(): Record<VcSubcommand, number> {
     transfer: 0,
     info: 0,
     delete: 0,
+    block: 0,
+    unblock: 0,
+    "block-list": 0,
   };
 }
 

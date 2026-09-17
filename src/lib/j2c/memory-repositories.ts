@@ -1,5 +1,9 @@
 import type { CreationReservationRecord } from "../../models/creation-reservation.ts";
 import type { GuildConfigRecord, UpsertGuildConfigInput } from "../../models/guild-config.ts";
+import {
+  OWNER_BLOCK_LIST_MAX,
+  type OwnerBlockListRecord,
+} from "../../models/owner-block-list.ts";
 import type { TemporaryChannelRecord, TemporaryChannelStatus } from "../../models/temporary-channel.ts";
 import { validateUpsertGuildConfigInput } from "./validation.ts";
 import type {
@@ -8,6 +12,7 @@ import type {
   CreateTemporaryChannelInput,
   CreationReservationRepository,
   GuildConfigRepository,
+  OwnerBlockListRepository,
   TemporaryChannelRepository,
 } from "./repositories.ts";
 
@@ -25,6 +30,7 @@ function cloneTemp(record: TemporaryChannelRecord): TemporaryChannelRecord {
     ...record,
     occupantIds: [...record.occupantIds],
     rejectedUserIds: [...record.rejectedUserIds],
+    appliedBlockUserIds: [...(record.appliedBlockUserIds ?? [])],
     createdAt: new Date(record.createdAt),
     updatedAt: new Date(record.updatedAt),
     ...(record.emptySince ? { emptySince: new Date(record.emptySince) } : {}),
@@ -111,6 +117,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         occupantIds: [...(input.occupantIds ?? [])],
         locked: false,
         rejectedUserIds: [],
+        appliedBlockUserIds: [...(input.appliedBlockUserIds ?? [])],
         createdAt: now,
         updatedAt: now,
       };
@@ -160,6 +167,17 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         .map(cloneTemp);
     },
 
+    async listActiveOwned(guildId, ownerId) {
+      return [...byChannel.values()]
+        .filter(
+          (record) =>
+            record.guildId === guildId &&
+            record.ownerId === ownerId &&
+            record.status === "active",
+        )
+        .map(cloneTemp);
+    },
+
     async listByGuild(guildId) {
       return [...byChannel.values()].filter((record) => record.guildId === guildId).map(cloneTemp);
     },
@@ -199,6 +217,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         occupantIds: [...occupantIds],
         locked: existing.locked,
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         createdAt: existing.createdAt,
         updatedAt: new Date(),
         ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
@@ -220,6 +239,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       const next: TemporaryChannelRecord = {
         ...existing,
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         occupantIds: [...existing.occupantIds],
         status: "deleting",
         deletionRequestId,
@@ -236,6 +256,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       const next: TemporaryChannelRecord = {
         ...existing,
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         occupantIds: [...existing.occupantIds],
         status: "stale",
         lastError,
@@ -251,6 +272,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
       const next: TemporaryChannelRecord = {
         ...existing,
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         occupantIds: [...existing.occupantIds],
         locked,
         updatedAt: new Date(),
@@ -267,6 +289,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...existing,
         occupantIds: [...existing.occupantIds],
         rejectedUserIds: [...existing.rejectedUserIds, userId],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);
@@ -281,6 +304,23 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...existing,
         occupantIds: [...existing.occupantIds],
         rejectedUserIds: existing.rejectedUserIds.filter((id) => id !== userId),
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async setAppliedBlockUserIds(channelId, appliedBlockUserIds) {
+      const existing = byChannel.get(channelId);
+      if (!existing || (existing.status !== "active" && existing.status !== "creating")) {
+        return undefined;
+      }
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...appliedBlockUserIds],
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);
@@ -304,6 +344,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...existing,
         occupantIds: [...existing.occupantIds],
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         ownerId: newOwnerId,
         updatedAt: new Date(),
       };
@@ -329,6 +370,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         occupantIds: [...existing.occupantIds],
         locked: existing.locked,
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         createdAt: existing.createdAt,
         updatedAt: new Date(),
         ...(existing.deletionAttemptedAt ? { deletionAttemptedAt: existing.deletionAttemptedAt } : {}),
@@ -351,6 +393,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...existing,
         occupantIds: [...existing.occupantIds],
         rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
         panelMessageId,
         panelVersion,
         panelOwnerId,
@@ -471,6 +514,67 @@ export function createMemoryCreationReservationRepository(now: () => Date = () =
 
     async listByStatus(status) {
       return [...byId.values()].filter((record) => record.status === status).map(cloneReservation);
+    },
+  };
+}
+
+export function createMemoryOwnerBlockListRepository(): OwnerBlockListRepository {
+  const byOwner = new Map<string, OwnerBlockListRecord>();
+
+  return {
+    async getBlockedUserIds(guildId, ownerId) {
+      return [...(byOwner.get(ownerKey(guildId, ownerId))?.blockedUserIds ?? [])];
+    },
+
+    async findByOwner(guildId, ownerId) {
+      const found = byOwner.get(ownerKey(guildId, ownerId));
+      if (!found) return undefined;
+      return {
+        ...found,
+        blockedUserIds: [...found.blockedUserIds],
+        createdAt: new Date(found.createdAt),
+        updatedAt: new Date(found.updatedAt),
+      };
+    },
+
+    async addBlockedUser(guildId, ownerId, blockedUserId) {
+      const existing = byOwner.get(ownerKey(guildId, ownerId));
+      const current = existing?.blockedUserIds ?? [];
+      if (current.includes(blockedUserId)) {
+        return { outcome: "exists", blockedUserIds: [...current] };
+      }
+      if (current.length >= OWNER_BLOCK_LIST_MAX) {
+        return { outcome: "limit", blockedUserIds: [...current] };
+      }
+      const now = new Date();
+      const blockedUserIds = [...current, blockedUserId];
+      byOwner.set(ownerKey(guildId, ownerId), {
+        guildId,
+        ownerId,
+        blockedUserIds,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      });
+      return { outcome: "added", blockedUserIds: [...blockedUserIds] };
+    },
+
+    async removeBlockedUser(guildId, ownerId, blockedUserId) {
+      const existing = byOwner.get(ownerKey(guildId, ownerId));
+      const current = existing?.blockedUserIds ?? [];
+      if (!current.includes(blockedUserId)) {
+        return { outcome: "missing", blockedUserIds: [...current] };
+      }
+      const blockedUserIds = current.filter((id) => id !== blockedUserId);
+      if (blockedUserIds.length === 0) {
+        byOwner.delete(ownerKey(guildId, ownerId));
+      } else if (existing) {
+        byOwner.set(ownerKey(guildId, ownerId), {
+          ...existing,
+          blockedUserIds,
+          updatedAt: new Date(),
+        });
+      }
+      return { outcome: "removed", blockedUserIds: [...blockedUserIds] };
     },
   };
 }

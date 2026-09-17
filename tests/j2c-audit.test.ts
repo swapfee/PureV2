@@ -69,6 +69,16 @@ describe("structural MongoDB index verification", () => {
         { name: "creation_reservations_eventId", key: { eventId: 1 } },
       ],
     },
+    {
+      modelName: "OwnerBlockList",
+      indexes: [
+        {
+          name: "owner_block_lists_guild_owner_unique",
+          key: { guildId: 1, ownerId: 1 },
+          unique: true,
+        },
+      ],
+    },
   ];
 
   test("accepts a valid index set", () => {

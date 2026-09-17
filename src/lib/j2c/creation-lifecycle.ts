@@ -6,6 +6,7 @@ import type { J2cMetrics } from "./metrics.ts";
 import type {
   CreationReservationRepository,
   GuildConfigRepository,
+  OwnerBlockListRepository,
   TemporaryChannelRepository,
 } from "./repositories.ts";
 import {
@@ -17,6 +18,7 @@ import {
 import type { ReservationService } from "./reservation-service.ts";
 import type { Clock } from "./time.ts";
 import { systemClock } from "./time.ts";
+import { synchronizeTemporaryChannelAccess } from "./voice-controls.ts";
 import { installVoiceControlPanel } from "./voice-panel-service.ts";
 
 export type CreationOutcome =
@@ -45,6 +47,7 @@ export function createCreationLifecycle(options: {
   readonly discord: DiscordApiPort;
   readonly metrics: J2cMetrics;
   readonly logger: Logger;
+  readonly blocks?: OwnerBlockListRepository;
   readonly clock?: Clock;
 }): CreationLifecycle {
   const clock = options.clock ?? systemClock();
@@ -215,6 +218,9 @@ export function createCreationLifecycle(options: {
       }
 
       const channelId = created.value.id;
+      const blockedUserIds = options.blocks
+        ? await options.blocks.getBlockedUserIds(input.guildId, input.memberId)
+        : [];
       try {
         await options.channels.create({
           guildId: input.guildId,
@@ -225,6 +231,7 @@ export function createCreationLifecycle(options: {
           reservationId,
           creationRequestId: createReqId,
           occupantIds: [],
+          appliedBlockUserIds: blockedUserIds,
         });
       } catch {
         const compensation = await compensate({
@@ -245,6 +252,26 @@ export function createCreationLifecycle(options: {
 
       // Install the panel while status is still "creating" so voice-state repair
       // (active-only) cannot race and send a second copy after markActive.
+      if (blockedUserIds.length > 0) {
+        const record = await options.channels.findByChannelId(channelId);
+        if (record) {
+          const sync = await synchronizeTemporaryChannelAccess({
+            discord: options.discord,
+            channels: options.channels,
+            record,
+            blockedUserIds,
+            requestId: `${createReqId}:blocks`,
+            reason: "apply owner block list on create",
+          });
+          if (!sync.ok) {
+            options.logger.warn("Failed to fully apply block list on channel create", {
+              guildId: input.guildId,
+              channelId,
+              failedUserIds: sync.failedUserIds,
+            });
+          }
+        }
+      }
       const botUser = await options.discord.getCurrentUser();
       if (botUser.kind === "found") {
         await installVoiceControlPanel({

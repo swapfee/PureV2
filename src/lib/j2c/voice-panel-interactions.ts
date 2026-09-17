@@ -4,7 +4,7 @@ import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import { ACTION_EMOJIS, failureResponse, successResponse } from "./action-response.ts";
 import { applyOwnerHandoffPresentation } from "./owner-handoff.ts";
-import type { GuildConfigRepository, TemporaryChannelRepository } from "./repositories.ts";
+import type { GuildConfigRepository, OwnerBlockListRepository, TemporaryChannelRepository } from "./repositories.ts";
 import {
   buildDeleteConfirmation,
   buildLimitModal,
@@ -26,6 +26,12 @@ import {
   temporaryChannelLockMatches,
   temporaryChannelVisibilityMatches,
 } from "./voice-controls.ts";
+import { syncBlocksAfterOwnershipChange } from "./owner-block-sync.ts";
+import {
+  BLOCK_LIST_BUTTON_PREFIX,
+  buildBlockListComponents,
+  formatBlockListPage,
+} from "./block-list-actions.ts";
 
 const OWNER_ACTIONS = new Set<VoicePanelAction>([
   "lock",
@@ -138,6 +144,7 @@ async function requireManagedConnected(options: {
 export function createVoicePanelInteractionHandler(options: {
   readonly channels: TemporaryChannelRepository;
   readonly configs?: GuildConfigRepository;
+  readonly blocks?: OwnerBlockListRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -147,6 +154,7 @@ export function createVoicePanelInteractionHandler(options: {
 } {
   const { channels, discord, logger, botUsername } = options;
   const configs = options.configs;
+  const blocks = options.blocks;
 
   return {
     handles(interaction) {
@@ -156,7 +164,8 @@ export function createVoicePanelInteractionHandler(options: {
         customId.startsWith(`${VOICE_PANEL_PREFIX}:`) ||
         customId.startsWith(`${VOICE_MODAL_PREFIX}:`) ||
         customId.startsWith(`${VOICE_SELECT_PREFIX}:`) ||
-        customId.startsWith(`${VOICE_DELETE_PREFIX}:`)
+        customId.startsWith(`${VOICE_DELETE_PREFIX}:`) ||
+        customId.startsWith(`${BLOCK_LIST_BUTTON_PREFIX}:`)
       );
     },
 
@@ -167,12 +176,23 @@ export function createVoicePanelInteractionHandler(options: {
       const replyState: InteractionReplyState = { deferred: false, answered: false };
 
       try {
+        if (parts[0] === BLOCK_LIST_BUTTON_PREFIX) {
+          await handleBlockListPage({
+            interaction,
+            parts,
+            ...(blocks ? { blocks } : {}),
+            discord,
+            replyState,
+          });
+          return;
+        }
         if (parts[0] === VOICE_PANEL_PREFIX) {
           await handlePanelButton({
             interaction,
             parts,
             channels,
             ...(configs ? { configs } : {}),
+            ...(blocks ? { blocks } : {}),
             discord,
             logger,
             botUsername,
@@ -190,6 +210,7 @@ export function createVoicePanelInteractionHandler(options: {
             parts,
             channels,
             ...(configs ? { configs } : {}),
+            ...(blocks ? { blocks } : {}),
             discord,
             logger,
             botUsername,
@@ -227,6 +248,7 @@ async function handlePanelButton(input: {
   readonly parts: readonly string[];
   readonly channels: TemporaryChannelRepository;
   readonly configs?: GuildConfigRepository;
+  readonly blocks?: OwnerBlockListRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -472,6 +494,21 @@ async function handlePanelButton(input: {
       );
       return;
     }
+    if (input.blocks) {
+      const ownerBlocks = await input.blocks.getBlockedUserIds(
+        access.record.guildId,
+        access.record.ownerId,
+      );
+      if (ownerBlocks.includes(input.interaction.userId)) {
+        await replyEphemeral(
+          input.discord,
+          input.interaction,
+          input.replyState,
+          failureResponse("You cannot claim this channel because the owner has blocked you."),
+        );
+        return;
+      }
+    }
     const ownerVoice = await input.discord.getUserVoiceChannel({
       guildId: access.record.guildId,
       userId: access.record.ownerId,
@@ -507,6 +544,18 @@ async function handlePanelButton(input: {
       requestId: `panel:claim:${input.interaction.id}`,
       ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
     });
+    if (input.blocks) {
+      await syncBlocksAfterOwnershipChange({
+        blocks: input.blocks,
+        channels: input.channels,
+        discord: input.discord,
+        logger: input.logger,
+        guildId: access.record.guildId,
+        channelId,
+        newOwnerId: input.interaction.userId,
+        requestId: `panel:claim:${input.interaction.id}:blocks`,
+      });
+    }
     await replyEphemeral(
       input.discord,
       input.interaction,
@@ -679,6 +728,7 @@ async function handleTransferSelect(input: {
   readonly parts: readonly string[];
   readonly channels: TemporaryChannelRepository;
   readonly configs?: GuildConfigRepository;
+  readonly blocks?: OwnerBlockListRepository;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly botUsername: string;
@@ -774,6 +824,19 @@ async function handleTransferSelect(input: {
     ...(transferred.panelMessageId ? { panelMessageId: transferred.panelMessageId } : {}),
   });
 
+  if (input.blocks) {
+    await syncBlocksAfterOwnershipChange({
+      blocks: input.blocks,
+      channels: input.channels,
+      discord: input.discord,
+      logger: input.logger,
+      guildId: access.record.guildId,
+      channelId,
+      newOwnerId: targetUserId,
+      requestId: `panel:transfer:${input.interaction.id}:blocks`,
+    });
+  }
+
   await input.discord.editInteractionResponse({
     applicationId: input.interaction.applicationId,
     interactionToken: input.interaction.token,
@@ -781,6 +844,84 @@ async function handleTransferSelect(input: {
       .embeds,
     components: [],
   });
+}
+
+async function handleBlockListPage(input: {
+  readonly interaction: InteractionCreatePayload;
+  readonly parts: readonly string[];
+  readonly blocks?: OwnerBlockListRepository;
+  readonly discord: DiscordApiPort;
+  readonly replyState: InteractionReplyState;
+}): Promise<void> {
+  const [, ownerId, pageRaw, extra] = input.parts;
+  if (!ownerId || !pageRaw || extra) return;
+
+  await deferUpdate(input.discord, input.interaction, input.replyState);
+
+  if (!input.interaction.guildId) {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      embeds: failureResponse("This command can only be used in a server.").embeds,
+      components: [],
+    });
+    input.replyState.answered = true;
+    return;
+  }
+
+  if (input.interaction.userId !== ownerId) {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      embeds: failureResponse("Only the block list owner can page through it.").embeds,
+      components: [],
+    });
+    input.replyState.answered = true;
+    return;
+  }
+
+  if (!input.blocks) {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      embeds: failureResponse("Block list is not ready yet.").embeds,
+      components: [],
+    });
+    input.replyState.answered = true;
+    return;
+  }
+
+  const pageNumber = Number(pageRaw);
+  if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      embeds: failureResponse("Invalid block list page.").embeds,
+      components: [],
+    });
+    input.replyState.answered = true;
+    return;
+  }
+
+  const blockedUserIds = await input.blocks.getBlockedUserIds(
+    input.interaction.guildId,
+    ownerId,
+  );
+  const page = formatBlockListPage({ blockedUserIds, page: pageNumber });
+  await input.discord.editInteractionResponse({
+    applicationId: input.interaction.applicationId,
+    interactionToken: input.interaction.token,
+    embeds: [{ description: page.description }],
+    components: [
+      ...buildBlockListComponents({
+        ownerId,
+        page: page.page,
+        hasPrev: page.hasPrev,
+        hasNext: page.hasNext,
+      }),
+    ],
+  });
+  input.replyState.answered = true;
 }
 
 async function handleDeleteConfirm(input: {
