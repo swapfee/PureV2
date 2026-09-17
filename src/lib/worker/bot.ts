@@ -494,6 +494,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           {
             body: {
               ...(request.content === undefined ? {} : { content: request.content }),
+              ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
               ...(request.components === undefined ? {} : { components: request.components }),
               ...(request.flags === undefined ? {} : { flags: request.flags }),
             },
@@ -514,6 +515,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           {
             body: {
               ...(request.content === undefined ? {} : { content: request.content }),
+              ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
               ...(request.components === undefined ? {} : { components: request.components }),
               ...(request.flags === undefined ? {} : { flags: request.flags }),
             },

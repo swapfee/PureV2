@@ -5,6 +5,7 @@ import type {
   DiscordApiPort,
   DiscordChannelDetails,
   DiscordOperationResult,
+  InteractionEmbed,
 } from "../runtime-types.ts";
 import type { OwnerBlockListRepository, TemporaryChannelRepository } from "./repositories.ts";
 import {
@@ -23,8 +24,6 @@ const ComponentTypes = {
 } as const;
 
 const ButtonStyles = {
-  Success: 3,
-  Danger: 4,
   Secondary: 2,
 } as const;
 
@@ -90,46 +89,62 @@ export function parseJoinRequestCustomId(customId: string):
   return { decision, channelId, requesterId, expiresAt };
 }
 
-export function formatJoinRequestMessage(options: {
-  readonly requesterId: string;
-  readonly ownerId: string;
-  readonly seconds: number;
-}): string {
-  return [
-    "**Join request**",
-    `<@${options.requesterId}> is requesting access to this locked voice channel.`,
-    `Owner: <@${options.ownerId}>`,
-    `This request expires in ${options.seconds} seconds.`,
-  ].join("\n");
+function discordRelativeTimestamp(expiresAtMs: number): string {
+  return `<t:${Math.floor(expiresAtMs / 1000)}:R>`;
 }
 
+export function formatJoinRequestEmbed(options: {
+  readonly requesterId: string;
+  readonly ownerId: string;
+  readonly expiresAt: number;
+}): InteractionEmbed {
+  return {
+    title: "Join request",
+    description: [
+      `<@${options.requesterId}> is requesting access to this locked voice channel.`,
+      `Owner: <@${options.ownerId}>`,
+      `Expires ${discordRelativeTimestamp(options.expiresAt)}.`,
+    ].join("\n"),
+  };
+}
+
+export function formatJoinRequestResolvedEmbed(options: {
+  readonly requesterId: string;
+  readonly ownerId: string;
+  readonly outcome: "approved" | "declined" | "expired" | "cancelled";
+}): InteractionEmbed {
+  if (options.outcome === "approved") {
+    return {
+      title: "Join request approved",
+      description: `<@${options.ownerId}> approved access for <@${options.requesterId}>.`,
+    };
+  }
+  if (options.outcome === "declined") {
+    return {
+      title: "Join request declined",
+      description: `<@${options.ownerId}> declined access for <@${options.requesterId}>.`,
+    };
+  }
+  if (options.outcome === "cancelled") {
+    return {
+      title: "Join request cancelled",
+      description: `The voice channel was deleted before a decision was made for <@${options.requesterId}>.`,
+    };
+  }
+  return {
+    title: "Join request expired",
+    description: `No decision was made for <@${options.requesterId}> within 60 seconds.`,
+  };
+}
+
+/** @deprecated Prefer formatJoinRequestEmbed — kept for string assertions in older call sites. */
 export function formatJoinRequestResolvedMessage(options: {
   readonly requesterId: string;
   readonly ownerId: string;
   readonly outcome: "approved" | "declined" | "expired" | "cancelled";
 }): string {
-  if (options.outcome === "approved") {
-    return [
-      "**Join request approved**",
-      `<@${options.ownerId}> approved access for <@${options.requesterId}>.`,
-    ].join("\n");
-  }
-  if (options.outcome === "declined") {
-    return [
-      "**Join request declined**",
-      `<@${options.ownerId}> declined access for <@${options.requesterId}>.`,
-    ].join("\n");
-  }
-  if (options.outcome === "cancelled") {
-    return [
-      "**Join request cancelled**",
-      `The voice channel was deleted before a decision was made for <@${options.requesterId}>.`,
-    ].join("\n");
-  }
-  return [
-    "**Join request expired**",
-    `No decision was made for <@${options.requesterId}> within 60 seconds.`,
-  ].join("\n");
+  const embed = formatJoinRequestResolvedEmbed(options);
+  return `**${embed.title}**\n${embed.description}`;
 }
 
 export function buildJoinRequestComponents(options: {
@@ -145,7 +160,8 @@ export function buildJoinRequestComponents(options: {
       components: [
         {
           type: ComponentTypes.Button,
-          style: ButtonStyles.Success,
+          style: ButtonStyles.Secondary,
+          label: "Approve",
           custom_id: buildJoinRequestCustomId(
             "approve",
             options.channelId,
@@ -157,7 +173,8 @@ export function buildJoinRequestComponents(options: {
         },
         {
           type: ComponentTypes.Button,
-          style: ButtonStyles.Danger,
+          style: ButtonStyles.Secondary,
+          label: "Decline",
           custom_id: buildJoinRequestCustomId(
             "decline",
             options.channelId,
@@ -406,11 +423,14 @@ export async function finalizeJoinRequestMessage(options: {
     channelId: options.channelId,
     messageId: options.messageId,
     requestId: options.requestId,
-    content: formatJoinRequestResolvedMessage({
-      requesterId: options.requesterId,
-      ownerId: options.ownerId,
-      outcome: options.outcome,
-    }),
+    content: "",
+    embeds: [
+      formatJoinRequestResolvedEmbed({
+        requesterId: options.requesterId,
+        ownerId: options.ownerId,
+        outcome: options.outcome,
+      }),
+    ],
     components: [
       ...buildJoinRequestComponents({
         channelId: options.channelId,

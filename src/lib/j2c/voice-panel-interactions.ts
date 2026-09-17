@@ -38,7 +38,7 @@ import {
   cancelPendingJoinRequestsForChannel,
   consumePendingJoinRequest,
   finalizeJoinRequestMessage,
-  formatJoinRequestResolvedMessage,
+  formatJoinRequestResolvedEmbed,
   parseJoinRequestCustomId,
   VC_JOIN_REQUEST_PREFIX,
 } from "./vc-join-request.ts";
@@ -1016,11 +1016,13 @@ async function handleJoinRequestButton(input: {
   await deferUpdate(input.discord, input.interaction, input.replyState);
 
   const publishResolved = async (outcome: "approved" | "declined" | "expired"): Promise<void> => {
-    const content = formatJoinRequestResolvedMessage({
-      requesterId: parsed.requesterId,
-      ownerId: record.ownerId,
-      outcome,
-    });
+    const embeds = [
+      formatJoinRequestResolvedEmbed({
+        requesterId: parsed.requesterId,
+        ownerId: record.ownerId,
+        outcome,
+      }),
+    ];
     const components = [
       ...buildJoinRequestComponents({
         channelId: parsed.channelId,
@@ -1046,7 +1048,8 @@ async function handleJoinRequestButton(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      content,
+      content: "",
+      embeds,
       components,
     });
     input.replyState.answered = true;

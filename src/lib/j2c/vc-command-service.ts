@@ -47,7 +47,7 @@ import {
   channelIsLockedForJoinRequests,
   cancelPendingJoinRequestsForChannel,
   finalizeJoinRequestMessage,
-  formatJoinRequestMessage,
+  formatJoinRequestEmbed,
   hasPendingJoinRequest,
   registerPendingJoinRequest,
   resolveManagedChannelTarget,
@@ -530,11 +530,13 @@ export function createVcCommandService(options: {
           const sent = await options.discord.sendChannelMessage({
             channelId: record.channelId,
             requestId: `${requestId}:message`,
-            content: formatJoinRequestMessage({
-              requesterId: interaction.userId,
-              ownerId: record.ownerId,
-              seconds: Math.round(VC_JOIN_REQUEST_TTL_MS / 1000),
-            }),
+            embeds: [
+              formatJoinRequestEmbed({
+                requesterId: interaction.userId,
+                ownerId: record.ownerId,
+                expiresAt,
+              }),
+            ],
             components: [
               ...buildJoinRequestComponents({
                 channelId: record.channelId,

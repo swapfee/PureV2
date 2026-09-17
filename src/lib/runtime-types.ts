@@ -256,6 +256,7 @@ export interface DiscordApiPort {
     readonly channelId: string;
     readonly requestId: string;
     readonly content?: string;
+    readonly embeds?: readonly InteractionEmbed[];
     readonly components?: readonly unknown[];
     readonly flags?: number;
   }): Promise<DiscordValueResult<{ readonly id: string }>>;
@@ -264,6 +265,7 @@ export interface DiscordApiPort {
     readonly messageId: string;
     readonly requestId: string;
     readonly content?: string;
+    readonly embeds?: readonly InteractionEmbed[];
     readonly components?: readonly unknown[];
     readonly flags?: number;
   }): Promise<DiscordOperationResult>;

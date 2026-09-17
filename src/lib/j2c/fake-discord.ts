@@ -68,6 +68,7 @@ export interface FakeDiscordControls {
     channelId: string;
     id: string;
     content?: string;
+    embeds?: readonly { description: string; color?: number; title?: string }[];
     components?: readonly unknown[];
     flags?: number;
   }[];
@@ -75,6 +76,7 @@ export interface FakeDiscordControls {
     channelId: string;
     messageId: string;
     content?: string;
+    embeds?: readonly { description: string; color?: number; title?: string }[];
     components?: readonly unknown[];
     flags?: number;
   }[];
@@ -450,6 +452,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         channelId: request.channelId,
         id,
         ...(request.content === undefined ? {} : { content: request.content }),
+        ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
         ...(request.components === undefined ? {} : { components: request.components }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
       });
@@ -461,6 +464,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         channelId: request.channelId,
         messageId: request.messageId,
         ...(request.content === undefined ? {} : { content: request.content }),
+        ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
         ...(request.components === undefined ? {} : { components: request.components }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
       });

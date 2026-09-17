@@ -13,7 +13,6 @@ import {
   buildJoinRequestKey,
   cancelPendingJoinRequestsForChannel,
   finalizeJoinRequestMessage,
-  formatJoinRequestResolvedMessage,
   hasPendingJoinRequest,
   registerPendingJoinRequest,
   resetJoinRequestStoreForTests,
@@ -157,9 +156,15 @@ describe("/vc request join flow", () => {
 
     expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Join request sent/i);
     expect(controls.channelMessages).toHaveLength(1);
-    expect(controls.channelMessages[0]?.content).toMatch(/Join request/i);
-    expect(controls.channelMessages[0]?.content).toContain(requesterId);
-    expect(JSON.stringify(controls.channelMessages[0]?.components)).toContain(VC_JOIN_REQUEST_PREFIX);
+    const posted = controls.channelMessages[0]!;
+    expect(posted.embeds?.[0]?.title).toBe("Join request");
+    expect(posted.embeds?.[0]?.description).toContain(requesterId);
+    expect(posted.embeds?.[0]?.description).toMatch(/<t:\d+:R>/);
+    const componentsJson = JSON.stringify(posted.components);
+    expect(componentsJson).toContain(VC_JOIN_REQUEST_PREFIX);
+    expect(componentsJson).toContain('"label":"Approve"');
+    expect(componentsJson).toContain('"label":"Decline"');
+    expect(componentsJson).toContain('"style":2');
     expect(metrics.snapshot().successes.request).toBe(1);
 
     // /vc permit remains owner-usable independently of request.
@@ -253,8 +258,9 @@ describe("/vc request join flow", () => {
 
     expect(controls.overwriteCalls.some((call) => call.overwriteId === requesterId)).toBe(true);
     const edited = controls.editedChannelMessages.at(-1);
-    expect(edited?.content).toMatch(/approved/i);
+    expect(edited?.embeds?.[0]?.title).toMatch(/approved/i);
     expect(JSON.stringify(edited?.components)).toContain('"disabled":true');
+    expect(JSON.stringify(edited?.components)).toContain('"label":"Approve"');
     expect(metrics.snapshot().successes.request).toBe(1);
   });
 
@@ -295,7 +301,7 @@ describe("/vc request join flow", () => {
     );
 
     expect(controls.overwriteCalls.length).toBe(overwritesBefore);
-    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/declined/i);
+    expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.title).toMatch(/declined/i);
   });
 
   test("non-owner cannot approve", async () => {
@@ -359,7 +365,7 @@ describe("/vc request join flow", () => {
       }),
     );
 
-    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/expired/i);
+    expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.title).toMatch(/expired/i);
     expect(JSON.stringify(controls.editedChannelMessages.at(-1)?.components)).toContain(
       '"disabled":true',
     );
@@ -392,13 +398,8 @@ describe("/vc request join flow", () => {
     expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
     const edited = controls.editedChannelMessages.at(-1);
     expect(edited?.messageId).toBe(messageId);
-    expect(edited?.content).toBe(
-      formatJoinRequestResolvedMessage({
-        requesterId,
-        ownerId,
-        outcome: "cancelled",
-      }),
-    );
+    expect(edited?.embeds?.[0]?.title).toBe("Join request cancelled");
+    expect(edited?.embeds?.[0]?.description).toContain(requesterId);
     expect(JSON.stringify(edited?.components)).toContain('"disabled":true');
   });
 
@@ -459,7 +460,7 @@ describe("/vc request join flow", () => {
     expect(await channels.findByChannelId(channelId)).toBeUndefined();
     expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
     const cancelled = controls.editedChannelMessages.find((entry) => entry.messageId === messageId);
-    expect(cancelled?.content).toMatch(/cancelled/i);
+    expect(cancelled?.embeds?.[0]?.title).toMatch(/cancelled/i);
     expect(JSON.stringify(cancelled?.components)).toContain('"disabled":true');
   });
 
@@ -521,7 +522,7 @@ describe("/vc request join flow", () => {
 
     expect(await channels.findByChannelId(channelId)).toBeUndefined();
     expect(hasPendingJoinRequest(channelId, requesterId)).toBe(false);
-    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/cancelled/i);
+    expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.title).toMatch(/cancelled/i);
   });
 
   test("finalizeJoinRequestMessage cancelled copy stays professional", async () => {
@@ -536,7 +537,7 @@ describe("/vc request join flow", () => {
       outcome: "cancelled",
       requestId: "finalize-cancelled",
     });
-    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/Join request cancelled/i);
-    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/channel was deleted/i);
+    expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.title).toMatch(/Join request cancelled/i);
+    expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.description).toMatch(/channel was deleted/i);
   });
 });
