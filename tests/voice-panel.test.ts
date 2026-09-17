@@ -392,7 +392,7 @@ describe("voice panel interactions", () => {
     );
   });
 
-  test("tells owners to connect when using their own panel from elsewhere", async () => {
+  test("requires a managed voice connection when using own panel from elsewhere", async () => {
     const otherChannelId = "555555555555555555";
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({
@@ -429,6 +429,7 @@ describe("voice panel interactions", () => {
         ],
       ]),
     });
+    // Sitting in a non-managed voice channel (lobby-like / regular VC).
     controls.voiceByUser.set(`${guildId}:${ownerId}`, otherChannelId);
 
     const handler = createVoicePanelInteractionHandler({
@@ -447,7 +448,77 @@ describe("voice panel interactions", () => {
     );
 
     expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
-      "Connect to your voice channel to manage it",
+      "You must be connected to a managed voice channel",
+    );
+  });
+
+  test("owner-only refusal when using own panel while in another managed VC", async () => {
+    const otherOwnerId = "666666666666666666";
+    const otherChannelId = "555555555555555555";
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    await channels.create({
+      guildId,
+      channelId: otherChannelId,
+      ownerId: otherOwnerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-2",
+      creationRequestId: "req-2",
+      occupantIds: [otherOwnerId, ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "owner-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+        [
+          otherChannelId,
+          {
+            id: otherChannelId,
+            name: "other-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, otherChannelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        userId: ownerId,
+        channelId,
+        customId: `${VOICE_PANEL_PREFIX}:lock:${channelId}:${ownerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "Only the owner of this voice channel can manage it",
     );
   });
 

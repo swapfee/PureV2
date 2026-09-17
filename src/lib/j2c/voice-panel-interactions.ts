@@ -54,12 +54,12 @@ const OWNER_ACTIONS = new Set<VoicePanelAction>([
   "delete",
 ]);
 
-/** Shown when a non-owner (including another VC owner) tries to use panel controls. */
+/** Shown when the caller is in a managed VC but cannot manage this panel. */
 const PANEL_OWNER_ONLY_MESSAGE =
   "Only the owner of this voice channel can manage it.";
-/** Shown when the owner uses their panel while connected elsewhere. */
-const PANEL_OWNER_CONNECT_MESSAGE =
-  "Connect to your voice channel to manage it.";
+/** Shown when the caller is not connected to any managed temporary VC. */
+const PANEL_NOT_IN_MANAGED_MESSAGE =
+  "You must be connected to a managed voice channel.";
 
 interface InteractionReplyState {
   deferred: boolean;
@@ -121,31 +121,23 @@ async function deferUpdate(
   replyState.deferred = true;
 }
 
+/**
+ * Two refusals only:
+ * - Not connected to any managed temporary VC → managed-channel required
+ * - Connected to a managed temporary VC (own or another) → owner-only
+ */
 async function panelAccessDeniedReason(options: {
   readonly guildId: string;
-  readonly userId: string;
-  readonly channelId: string;
-  readonly record:
-    | NonNullable<Awaited<ReturnType<TemporaryChannelRepository["findByChannelId"]>>>
-    | undefined;
   readonly channels: TemporaryChannelRepository;
+  readonly currentVoiceChannelId: string | null | undefined;
 }): Promise<string> {
-  const { record } = options;
-  if (record && record.status === "active" && record.guildId === options.guildId) {
-    if (record.ownerId === options.userId) {
-      return PANEL_OWNER_CONNECT_MESSAGE;
+  if (options.currentVoiceChannelId) {
+    const current = await options.channels.findByChannelId(options.currentVoiceChannelId);
+    if (current && current.status === "active" && current.guildId === options.guildId) {
+      return PANEL_OWNER_ONLY_MESSAGE;
     }
-    return PANEL_OWNER_ONLY_MESSAGE;
   }
-
-  const owned = await options.channels.findActiveOrCreatingByOwner(
-    options.guildId,
-    options.userId,
-  );
-  if (owned && owned.channelId !== options.channelId) {
-    return PANEL_OWNER_ONLY_MESSAGE;
-  }
-  return "You must be connected to this voice channel to use its controls.";
+  return PANEL_NOT_IN_MANAGED_MESSAGE;
 }
 
 async function requireManagedConnected(options: {
@@ -164,52 +156,51 @@ async function requireManagedConnected(options: {
 
   const record = await options.channels.findByChannelId(channelId);
 
+  const voice = await options.discord.getUserVoiceChannel({
+    guildId: interaction.guildId,
+    userId: interaction.userId,
+  });
+  const currentVoiceChannelId =
+    voice.kind === "found" ? voice.value.channelId : undefined;
+
   if (interaction.channelId !== channelId) {
     return {
       ok: false,
       reason: await panelAccessDeniedReason({
         guildId: interaction.guildId,
-        userId: interaction.userId,
-        channelId,
-        record,
         channels: options.channels,
+        currentVoiceChannelId,
       }),
     };
   }
 
-  // Voice mismatch first: owners using another managed panel must get the
-  // ownership refusal, not the generic "managed voice channel" connection error.
-  const voice = await options.discord.getUserVoiceChannel({
-    guildId: interaction.guildId,
-    userId: interaction.userId,
-  });
+  // Voice mismatch first: callers in another managed panel channel get the
+  // owner-only refusal, not a misleading connection error for this panel.
   if (voice.kind !== "found" || voice.value.channelId !== channelId) {
     return {
       ok: false,
       reason: await panelAccessDeniedReason({
         guildId: interaction.guildId,
-        userId: interaction.userId,
-        channelId,
-        record,
         channels: options.channels,
+        currentVoiceChannelId,
       }),
     };
   }
 
   const channel = await options.discord.getChannel({ channelId });
   if (channel.kind !== "found") {
-    return { ok: false, reason: "You must be connected to a managed voice channel." };
+    return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
   // Treat missing type as unknown and continue; only reject known non-voice types.
   if (
     channel.value.type !== undefined &&
     channel.value.type !== ChannelTypes.GuildVoice
   ) {
-    return { ok: false, reason: "You must be connected to a managed voice channel." };
+    return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
 
   if (!record || record.status !== "active" || record.guildId !== interaction.guildId) {
-    return { ok: false, reason: "You must be connected to a managed voice channel." };
+    return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
   return { ok: true, record };
 }
