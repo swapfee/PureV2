@@ -48,6 +48,28 @@ function cloneReservation(record: CreationReservationRecord): CreationReservatio
   };
 }
 
+function buildGuildConfigRecord(
+  validated: ReturnType<typeof validateUpsertGuildConfigInput>,
+  existing: GuildConfigRecord | undefined,
+  now: Date,
+): GuildConfigRecord {
+  return {
+    guildId: validated.guildId,
+    enabled: validated.enabled,
+    lobbyChannelId: validated.lobbyChannelId,
+    categoryId: validated.categoryId,
+    channelNameTemplate: validated.channelNameTemplate,
+    ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
+    ownerCanEdit: validated.ownerCanEdit ?? false,
+    permissionSource: validated.permissionSource ?? "category",
+    namingMode: validated.namingMode ?? "template",
+    sequenceNext: validated.sequenceNext ?? 1,
+    moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+}
+
 export function createMemoryGuildConfigRepository(): GuildConfigRepository {
   const byGuild = new Map<string, GuildConfigRecord>();
 
@@ -56,25 +78,21 @@ export function createMemoryGuildConfigRepository(): GuildConfigRepository {
       const found = byGuild.get(guildId);
       return found ? cloneGuild(found) : undefined;
     },
+    async create(input: UpsertGuildConfigInput) {
+      const validated = validateUpsertGuildConfigInput(input);
+      const existing = byGuild.get(validated.guildId);
+      if (existing) {
+        return { kind: "exists", record: cloneGuild(existing) };
+      }
+      const record = buildGuildConfigRecord(validated, undefined, new Date());
+      byGuild.set(record.guildId, record);
+      return { kind: "created", record: cloneGuild(record) };
+    },
     async upsert(input: UpsertGuildConfigInput) {
       const validated = validateUpsertGuildConfigInput(input);
       const now = new Date();
       const existing = byGuild.get(validated.guildId);
-      const record: GuildConfigRecord = {
-        guildId: validated.guildId,
-        enabled: validated.enabled,
-        lobbyChannelId: validated.lobbyChannelId,
-        categoryId: validated.categoryId,
-        channelNameTemplate: validated.channelNameTemplate,
-        ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
-        ownerCanEdit: validated.ownerCanEdit ?? false,
-        permissionSource: validated.permissionSource ?? "category",
-        namingMode: validated.namingMode ?? "template",
-        sequenceNext: validated.sequenceNext ?? 1,
-        moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      };
+      const record = buildGuildConfigRecord(validated, existing, now);
       byGuild.set(record.guildId, record);
       return cloneGuild(record);
     },

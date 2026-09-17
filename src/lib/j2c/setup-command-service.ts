@@ -38,6 +38,8 @@ const ADMINISTRATOR = BitwisePermissionFlags.ADMINISTRATOR;
 const SETUP_SUCCESS_HEADLINE = "Setup Complete";
 const CONFIG_SUCCESS_HEADLINE = "Setup Updated";
 const RESET_SUCCESS_HEADLINE = "Factory Reset Complete";
+const ALREADY_CONFIGURED_MESSAGE =
+  "This server already has a Join to Create system. Use `/setup config` to change settings, or `/reset` before creating a new one";
 
 type SetupSubcommand = "create" | "config" | "reset";
 
@@ -251,7 +253,7 @@ export function createSetupCommandService(options: {
       }
 
       if (existing) {
-        await finish(failureResponse("Join to Create System already exists."));
+        await finish(failureResponse(ALREADY_CONFIGURED_MESSAGE));
         return;
       }
 
@@ -270,6 +272,12 @@ export function createSetupCommandService(options: {
   }): Promise<void> {
     const { interaction, guildId, finish } = input;
     const setupReason = "PureV2 Join-to-Create setup";
+
+    // Re-check immediately before Discord mutations (covers concurrent /setup).
+    if (await configs.findByGuildId(guildId)) {
+      await finish(failureResponse(ALREADY_CONFIGURED_MESSAGE));
+      return;
+    }
 
     const categoryCreated = await discord.createGuildChannel({
       guildId,
@@ -305,6 +313,19 @@ export function createSetupCommandService(options: {
 
     const lobbyChannelId = lobbyCreated.value.id;
 
+    const compensateCreatedChannels = async (): Promise<void> => {
+      await discord.deleteChannel({
+        channelId: lobbyChannelId,
+        requestId: `setup:${interaction.id}:compensate-lobby`,
+        reason: setupReason,
+      });
+      await discord.deleteChannel({
+        channelId: categoryId,
+        requestId: `setup:${interaction.id}:compensate-category`,
+        reason: setupReason,
+      });
+    };
+
     try {
       const upsertInput = validateUpsertGuildConfigInput({
         guildId,
@@ -319,27 +340,24 @@ export function createSetupCommandService(options: {
         moderatorRoleIds: [],
       });
 
-      const record = await configs.upsert(upsertInput);
+      const created = await configs.create(upsertInput);
+      if (created.kind === "exists") {
+        await compensateCreatedChannels();
+        await finish(failureResponse(ALREADY_CONFIGURED_MESSAGE));
+        return;
+      }
+
       logger.info("Guild Join-to-Create setup completed", {
-        guildId: record.guildId,
-        lobbyChannelId: record.lobbyChannelId,
-        categoryId: record.categoryId,
-        namingMode: record.namingMode,
+        guildId: created.record.guildId,
+        lobbyChannelId: created.record.lobbyChannelId,
+        categoryId: created.record.categoryId,
+        namingMode: created.record.namingMode,
         userId: interaction.userId,
       });
 
       await finish(successResponse(SETUP_SUCCESS_HEADLINE));
     } catch (error: unknown) {
-      await discord.deleteChannel({
-        channelId: lobbyChannelId,
-        requestId: `setup:${interaction.id}:compensate-lobby`,
-        reason: setupReason,
-      });
-      await discord.deleteChannel({
-        channelId: categoryId,
-        requestId: `setup:${interaction.id}:compensate-category`,
-        reason: setupReason,
-      });
+      await compensateCreatedChannels();
 
       if (error instanceof GuildConfigValidationError) {
         await finish(failureResponse(error.message));

@@ -55,6 +55,28 @@ describe("memory guild config repository", () => {
     expect(second.enabled).toBe(false);
     expect((await repo.findByGuildId("123456789012345678"))?.channelNameTemplate).toBe("Room {username}");
   });
+
+  test("create refuses a second Join to Create config for the same guild", async () => {
+    const repo = createMemoryGuildConfigRepository();
+    const input = {
+      guildId: "123456789012345678",
+      enabled: true,
+      lobbyChannelId: "223456789012345678",
+      categoryId: "323456789012345678",
+      channelNameTemplate: "{username}'s channel",
+    } as const;
+    const first = await repo.create(input);
+    expect(first.kind).toBe("created");
+    const second = await repo.create({
+      ...input,
+      lobbyChannelId: "423456789012345678",
+      categoryId: "523456789012345678",
+    });
+    expect(second.kind).toBe("exists");
+    if (second.kind === "exists") {
+      expect(second.record.lobbyChannelId).toBe("223456789012345678");
+    }
+  });
 });
 
 describe("memory temporary channel repository", () => {

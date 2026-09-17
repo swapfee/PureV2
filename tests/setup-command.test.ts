@@ -231,8 +231,11 @@ describe("/setup command", () => {
   });
 
   test("rejects create when Join to Create System already exists", async () => {
-    const { setup, controls } = createSetupDeps();
+    const { setup, controls, configs } = createSetupDeps();
     await setup.execute(baseInteraction());
+    const first = await configs.findByGuildId("123456789012345678");
+    expect(first).toBeDefined();
+
     await setup.execute(
       baseInteraction({
         id: "987654321098765433",
@@ -241,9 +244,14 @@ describe("/setup command", () => {
     );
 
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /Join to Create System already exists/i,
+      /already has a Join to Create system/i,
     );
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/\/setup config/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/\/reset/i);
     expect(controls.guildChannelCreates).toHaveLength(2);
+    const stillFirst = await configs.findByGuildId("123456789012345678");
+    expect(stillFirst?.lobbyChannelId).toBe(first!.lobbyChannelId);
+    expect(stillFirst?.categoryId).toBe(first!.categoryId);
   });
 
   test("factory reset deletes empty channels and config but keeps occupied rooms and category", async () => {

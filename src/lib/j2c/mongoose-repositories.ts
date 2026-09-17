@@ -145,6 +145,36 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
       const doc = await GuildConfigModel.findOne({ guildId }).lean().exec();
       return doc ? toGuildRecord(doc) : undefined;
     },
+    async create(input) {
+      const validated = validateUpsertGuildConfigInput(input);
+      try {
+        const doc = await GuildConfigModel.create({
+          guildId: validated.guildId,
+          enabled: validated.enabled,
+          lobbyChannelId: validated.lobbyChannelId,
+          categoryId: validated.categoryId,
+          channelNameTemplate: validated.channelNameTemplate,
+          ...(validated.defaultUserLimit === undefined
+            ? {}
+            : { defaultUserLimit: validated.defaultUserLimit }),
+          ownerCanEdit: validated.ownerCanEdit ?? false,
+          permissionSource: validated.permissionSource ?? "category",
+          namingMode: validated.namingMode ?? "template",
+          sequenceNext: validated.sequenceNext ?? 1,
+          moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
+        });
+        return { kind: "created", record: toGuildRecord(doc.toObject()) };
+      } catch (error: unknown) {
+        const code = Reflect.get(error ?? {}, "code");
+        if (code === 11000) {
+          const existing = await GuildConfigModel.findOne({ guildId: validated.guildId }).lean().exec();
+          if (existing) {
+            return { kind: "exists", record: toGuildRecord(existing) };
+          }
+        }
+        throw error;
+      }
+    },
     async upsert(input: UpsertGuildConfigInput) {
       const validated = validateUpsertGuildConfigInput(input);
       const setFields: Record<string, unknown> = {

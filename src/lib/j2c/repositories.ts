@@ -3,8 +3,14 @@ import type { GuildConfigRecord, UpsertGuildConfigInput } from "../../models/gui
 import type { OwnerBlockListRecord } from "../../models/owner-block-list.ts";
 import type { TemporaryChannelRecord, TemporaryChannelStatus } from "../../models/temporary-channel.ts";
 
+export type CreateGuildConfigResult =
+  | { readonly kind: "created"; readonly record: GuildConfigRecord }
+  | { readonly kind: "exists"; readonly record: GuildConfigRecord };
+
 export interface GuildConfigRepository {
   findByGuildId(guildId: string): Promise<GuildConfigRecord | undefined>;
+  /** Insert-only. Returns `exists` when the guild already has a Join to Create config. */
+  create(input: UpsertGuildConfigInput): Promise<CreateGuildConfigResult>;
   upsert(input: UpsertGuildConfigInput): Promise<GuildConfigRecord>;
   deleteByGuildId(guildId: string): Promise<boolean>;
 }
