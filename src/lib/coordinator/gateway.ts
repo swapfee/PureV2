@@ -1,6 +1,8 @@
 import {
+  ActivityTypes,
   createGatewayManager,
   GatewayIntents,
+  type BotStatusUpdate,
   type GatewayManager,
   type DiscordGatewayPayload,
   type RestManager,
@@ -10,6 +12,24 @@ import {
 
 import type { Logger } from "../logger.ts";
 import { createDiscordenoLogger } from "../logger.ts";
+
+/** Shown as the bot's Discord custom status while connected. */
+export const BOT_CUSTOM_STATUS = "PureV2 · early beta";
+
+function botPresence(): BotStatusUpdate {
+  return {
+    since: null,
+    status: "online",
+    activities: [
+      {
+        // Type 4 custom status: `name` stays "Custom Status"; `state` is the visible text.
+        name: "Custom Status",
+        type: ActivityTypes.Custom,
+        state: BOT_CUSTOM_STATUS,
+      } as BotStatusUpdate["activities"][number] & { state: string },
+    ],
+  };
+}
 
 export type GatewayEventForwarder = (
   shardId: number,
@@ -96,6 +116,7 @@ export function createCoordinatorGateway(options: CoordinatorGatewayOptions): Co
           browser: "Discord iOS",
           device: "Discordeno",
         },
+        makePresence: async () => botPresence(),
         // Keep shards in this process; workers only process events.
         totalWorkers: 1,
         shardsPerWorker: connection.shards,
