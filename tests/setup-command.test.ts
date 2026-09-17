@@ -387,19 +387,44 @@ describe("sequential channel names", () => {
     expect(renderSequentialChannelName("Gaming", 12)).toBe("Gaming 12");
   });
 
-  test("claimNextSequenceNumber increments", async () => {
-    const configs = createMemoryGuildConfigRepository();
-    await configs.upsert({
+  test("allocateSequenceNumber gap-fills the lowest free number", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
       guildId: "123456789012345678",
-      enabled: true,
+      channelId: "111111111111111111",
+      ownerId: "aaaaaaaaaaaaaaaaaa",
       lobbyChannelId: "223456789012345678",
-      categoryId: "323456789012345678",
-      channelNameTemplate: "Gaming",
-      namingMode: "sequence",
-      sequenceNext: 1,
+      status: "active",
+      reservationId: "r1",
+      creationRequestId: "c1",
+      sequenceNumber: 1,
     });
-    expect(await configs.claimNextSequenceNumber("123456789012345678")).toBe(1);
-    expect(await configs.claimNextSequenceNumber("123456789012345678")).toBe(2);
-    expect((await configs.findByGuildId("123456789012345678"))?.sequenceNext).toBe(3);
+    await channels.create({
+      guildId: "123456789012345678",
+      channelId: "222222222222222222",
+      ownerId: "bbbbbbbbbbbbbbbbbb",
+      lobbyChannelId: "223456789012345678",
+      status: "active",
+      reservationId: "r2",
+      creationRequestId: "c2",
+      sequenceNumber: 3,
+    });
+
+    expect(await channels.allocateSequenceNumber("123456789012345678")).toBe(2);
+
+    await channels.create({
+      guildId: "123456789012345678",
+      channelId: "333333333333333333",
+      ownerId: "cccccccccccccccccc",
+      lobbyChannelId: "223456789012345678",
+      status: "active",
+      reservationId: "r3",
+      creationRequestId: "c3",
+      sequenceNumber: 2,
+    });
+    expect(await channels.allocateSequenceNumber("123456789012345678")).toBe(4);
+
+    await channels.remove("222222222222222222");
+    expect(await channels.allocateSequenceNumber("123456789012345678")).toBe(3);
   });
 });

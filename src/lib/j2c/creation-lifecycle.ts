@@ -195,10 +195,10 @@ export function createCreationLifecycle(options: {
         ...(input.username === undefined ? {} : { username: input.username }),
       });
       let channelName: string;
+      let sequenceNumber: number | undefined;
       if (config.namingMode === "sequence") {
-        const sequence =
-          (await options.configs.claimNextSequenceNumber(input.guildId)) ?? config.sequenceNext;
-        channelName = renderSequentialChannelName(config.channelNameTemplate, sequence);
+        sequenceNumber = await options.channels.allocateSequenceNumber(input.guildId);
+        channelName = renderSequentialChannelName(config.channelNameTemplate, sequenceNumber);
       } else {
         channelName = renderChannelName(config.channelNameTemplate, channelUsername);
       }
@@ -207,6 +207,8 @@ export function createCreationLifecycle(options: {
         name: channelName,
         parentId: config.categoryId,
         ...(config.defaultUserLimit === undefined ? {} : { userLimit: config.defaultUserLimit }),
+        // Keep sequential rooms ordered under the category (lobby typically stays above).
+        ...(sequenceNumber === undefined ? {} : { position: sequenceNumber }),
         requestId: createReqId,
         reason: "join-to-create",
       });
@@ -259,6 +261,7 @@ export function createCreationLifecycle(options: {
           creationRequestId: createReqId,
           occupantIds: [],
           appliedBlockUserIds: blockedUserIds,
+          ...(sequenceNumber === undefined ? {} : { sequenceNumber }),
         });
       } catch {
         const compensation = await compensate({

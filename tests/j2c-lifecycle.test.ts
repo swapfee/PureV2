@@ -129,8 +129,61 @@ describe("creation lifecycle", () => {
     expect(outcome.kind).toBe("created");
     expect(controls.createCalls[0]?.name).toBe("Gaming 1");
     expect(controls.createCalls[0]?.userLimit).toBe(4);
+    expect(controls.createCalls[0]?.position).toBe(1);
     expect(controls.overwriteCalls.some((call) => call.overwriteId === memberId)).toBe(true);
-    expect((await configs.findByGuildId(guildId))?.sequenceNext).toBe(2);
+    const stored = [...(await channels.listByGuild(guildId))];
+    expect(stored[0]?.sequenceNumber).toBe(1);
+  });
+
+  test("sequence naming gap-fills after a temporary channel is deleted", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "VC",
+      namingMode: "sequence",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId: "711111111111111111",
+      ownerId: "811111111111111111",
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "r-a",
+      creationRequestId: "c-a",
+      sequenceNumber: 1,
+    });
+    await channels.create({
+      guildId,
+      channelId: "722222222222222222",
+      ownerId: "822222222222222222",
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "r-b",
+      creationRequestId: "c-b",
+      sequenceNumber: 3,
+    });
+    // Gap at 2 after VC 2 was deleted.
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-seq-gap",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(controls.createCalls[0]?.name).toBe("VC 2");
+    expect(controls.createCalls[0]?.position).toBe(2);
   });
 
   test("cancels when the user leaves the lobby before channel creation", async () => {

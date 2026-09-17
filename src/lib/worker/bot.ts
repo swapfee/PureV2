@@ -168,6 +168,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
                 type: ChannelTypes.GuildVoice,
                 parent_id: request.parentId,
                 ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+                ...(request.position === undefined ? {} : { position: request.position }),
               },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },

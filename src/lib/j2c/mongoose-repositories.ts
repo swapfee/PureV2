@@ -79,6 +79,7 @@ function toTempRecord(doc: {
   deletionAttemptedAt?: Date | null;
   deletionRequestId?: string | null;
   lastError?: string | null;
+  sequenceNumber?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }): TemporaryChannelRecord {
@@ -104,6 +105,9 @@ function toTempRecord(doc: {
     ...(doc.deletionAttemptedAt ? { deletionAttemptedAt: doc.deletionAttemptedAt } : {}),
     ...(doc.deletionRequestId ? { deletionRequestId: doc.deletionRequestId } : {}),
     ...(doc.lastError ? { lastError: doc.lastError } : {}),
+    ...(typeof doc.sequenceNumber === "number" && doc.sequenceNumber >= 1
+      ? { sequenceNumber: doc.sequenceNumber }
+      : {}),
   };
 }
 
@@ -180,29 +184,6 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
       const result = await GuildConfigModel.deleteOne({ guildId }).exec();
       return result.deletedCount > 0;
     },
-    async claimNextSequenceNumber(guildId) {
-      await GuildConfigModel.updateOne(
-        {
-          guildId,
-          $or: [
-            { sequenceNext: { $exists: false } },
-            { sequenceNext: null },
-            { sequenceNext: { $lte: 0 } },
-          ],
-        },
-        { $set: { sequenceNext: 1 } },
-      ).exec();
-
-      const doc = await GuildConfigModel.findOneAndUpdate(
-        { guildId },
-        { $inc: { sequenceNext: 1 } },
-        { returnDocument: "before" },
-      )
-        .lean()
-        .exec();
-      if (!doc) return undefined;
-      return typeof doc.sequenceNext === "number" && doc.sequenceNext >= 1 ? doc.sequenceNext : 1;
-    },
   };
 }
 
@@ -221,6 +202,7 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
         locked: false,
         rejectedUserIds: [],
         appliedBlockUserIds: [...(input.appliedBlockUserIds ?? [])],
+        ...(input.sequenceNumber === undefined ? {} : { sequenceNumber: input.sequenceNumber }),
       });
       return toTempRecord(doc.toObject());
     },
@@ -274,6 +256,24 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
     async listByGuild(guildId) {
       const docs = await TemporaryChannelModel.find({ guildId }).lean().exec();
       return docs.map(toTempRecord);
+    },
+
+    async allocateSequenceNumber(guildId) {
+      const docs = await TemporaryChannelModel.find({
+        guildId,
+        status: { $in: ["creating", "active", "deleting"] },
+      })
+        .lean()
+        .exec();
+      const used = new Set<number>();
+      for (const doc of docs) {
+        if (typeof doc.sequenceNumber === "number" && doc.sequenceNumber >= 1) {
+          used.add(doc.sequenceNumber);
+        }
+      }
+      let next = 1;
+      while (used.has(next)) next += 1;
+      return next;
     },
 
     async countByStatus(status) {

@@ -7,11 +7,6 @@ export interface GuildConfigRepository {
   findByGuildId(guildId: string): Promise<GuildConfigRecord | undefined>;
   upsert(input: UpsertGuildConfigInput): Promise<GuildConfigRecord>;
   deleteByGuildId(guildId: string): Promise<boolean>;
-  /**
-   * Atomically claims the next sequential channel number for a guild.
-   * Returns undefined when the guild has no Join-to-Create config.
-   */
-  claimNextSequenceNumber(guildId: string): Promise<number | undefined>;
 }
 
 export interface CreateTemporaryChannelInput {
@@ -24,6 +19,7 @@ export interface CreateTemporaryChannelInput {
   readonly creationRequestId: string;
   readonly occupantIds?: readonly string[];
   readonly appliedBlockUserIds?: readonly string[];
+  readonly sequenceNumber?: number;
 }
 
 export interface TemporaryChannelRepository {
@@ -36,6 +32,11 @@ export interface TemporaryChannelRepository {
   listActiveByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
   listByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;
   listActiveOwned(guildId: string, ownerId: string): Promise<readonly TemporaryChannelRecord[]>;
+  /**
+   * Lowest free sequential number for a guild (gap-fill).
+   * Considers creating / active / deleting temporary channels only.
+   */
+  allocateSequenceNumber(guildId: string): Promise<number>;
   countByStatus(status: TemporaryChannelStatus): Promise<number>;
   markActive(channelId: string, occupantIds: readonly string[]): Promise<TemporaryChannelRecord | undefined>;
   setOccupants(

@@ -81,17 +81,6 @@ export function createMemoryGuildConfigRepository(): GuildConfigRepository {
     async deleteByGuildId(guildId) {
       return byGuild.delete(guildId);
     },
-    async claimNextSequenceNumber(guildId) {
-      const existing = byGuild.get(guildId);
-      if (!existing) return undefined;
-      const claimed = existing.sequenceNext;
-      byGuild.set(guildId, {
-        ...existing,
-        sequenceNext: claimed + 1,
-        updatedAt: new Date(),
-      });
-      return claimed;
-    },
   };
 }
 
@@ -116,9 +105,27 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
     }
   };
 
+  const assertSequenceUniqueness = (input: CreateTemporaryChannelInput): void => {
+    if (input.sequenceNumber === undefined) return;
+    if (input.status !== "creating" && input.status !== "active" && input.status !== "deleting") return;
+    for (const record of byChannel.values()) {
+      if (
+        record.guildId === input.guildId &&
+        record.sequenceNumber === input.sequenceNumber &&
+        (record.status === "creating" || record.status === "active" || record.status === "deleting") &&
+        record.channelId !== input.channelId
+      ) {
+        throw new Error(
+          `Sequence ${input.sequenceNumber} already used in guild ${input.guildId}`,
+        );
+      }
+    }
+  };
+
   return {
     async create(input) {
       assertOwnerUniqueness(input);
+      assertSequenceUniqueness(input);
       if (byChannel.has(input.channelId)) throw new Error(`Channel ${input.channelId} already exists`);
       const now = new Date();
       const record: TemporaryChannelRecord = {
@@ -133,6 +140,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         locked: false,
         rejectedUserIds: [],
         appliedBlockUserIds: [...(input.appliedBlockUserIds ?? [])],
+        ...(input.sequenceNumber === undefined ? {} : { sequenceNumber: input.sequenceNumber }),
         createdAt: now,
         updatedAt: now,
       };
@@ -195,6 +203,22 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
 
     async listByGuild(guildId) {
       return [...byChannel.values()].filter((record) => record.guildId === guildId).map(cloneTemp);
+    },
+
+    async allocateSequenceNumber(guildId) {
+      const used = new Set<number>();
+      for (const record of byChannel.values()) {
+        if (record.guildId !== guildId) continue;
+        if (record.status !== "creating" && record.status !== "active" && record.status !== "deleting") {
+          continue;
+        }
+        if (typeof record.sequenceNumber === "number" && record.sequenceNumber >= 1) {
+          used.add(record.sequenceNumber);
+        }
+      }
+      let next = 1;
+      while (used.has(next)) next += 1;
+      return next;
     },
 
     async countByStatus(status) {

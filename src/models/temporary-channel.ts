@@ -63,6 +63,8 @@ const temporaryChannelSchema = new Schema(
     deletionAttemptedAt: { type: Date, required: false },
     deletionRequestId: { type: String, required: false, trim: true, maxlength: 80 },
     lastError: { type: String, required: false, maxlength: 2_000 },
+    /** Sequential setup number (gap-filled on create; omitted for template naming). */
+    sequenceNumber: { type: Number, required: false, min: 1 },
   },
   {
     timestamps: true,
@@ -84,6 +86,17 @@ temporaryChannelSchema.index(
 );
 temporaryChannelSchema.index({ status: 1, updatedAt: 1 }, { name: "temporary_channels_status_updatedAt" });
 temporaryChannelSchema.index({ guildId: 1, status: 1 }, { name: "temporary_channels_guild_status" });
+temporaryChannelSchema.index(
+  { guildId: 1, sequenceNumber: 1 },
+  {
+    unique: true,
+    name: "temporary_channels_guild_sequence_unique",
+    partialFilterExpression: {
+      status: { $in: ["creating", "active", "deleting"] },
+      sequenceNumber: { $type: "number" },
+    },
+  },
+);
 
 export type TemporaryChannelDocument = InferSchemaType<typeof temporaryChannelSchema> & {
   createdAt: Date;
@@ -117,6 +130,7 @@ export interface TemporaryChannelRecord {
   readonly deletionAttemptedAt?: Date;
   readonly deletionRequestId?: string;
   readonly lastError?: string;
+  readonly sequenceNumber?: number;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
