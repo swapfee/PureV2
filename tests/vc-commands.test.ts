@@ -707,7 +707,7 @@ describe("/vc command family", () => {
         options: [{ name: "info", type: 1 }],
       }),
     );
-    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Channel Info/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Owner/i);
     expect(embedText(controls.editedInteractions.at(-1))).toContain(ownerId);
     expect(metrics.snapshot().successes.info).toBe(1);
 

@@ -14,26 +14,26 @@ export interface ActionMessage {
 }
 
 /**
- * Formal success embed: `<emoji> Message.` plus optional detail lines.
+ * Formal success embed: `<emoji> Message.`
  */
-export function successResponse(message: string, details?: string | readonly string[]): ActionMessage {
+export function successResponse(message: string): ActionMessage {
   return {
     embeds: [
       {
-        description: formatActionDescription(ACTION_EMOJIS.success, message, details),
+        description: formatActionDescription(ACTION_EMOJIS.success, message),
       },
     ],
   };
 }
 
 /**
- * Formal failure embed: `<emoji> Message.` plus optional detail lines.
+ * Formal failure embed: `<emoji> Message.`
  */
-export function failureResponse(message: string, details?: string | readonly string[]): ActionMessage {
+export function failureResponse(message: string): ActionMessage {
   return {
     embeds: [
       {
-        description: formatActionDescription(ACTION_EMOJIS.error, message, details),
+        description: formatActionDescription(ACTION_EMOJIS.error, message),
       },
     ],
   };
@@ -45,16 +45,6 @@ function ensureTerminalPunctuation(text: string): string {
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
-function formatActionDescription(
-  emoji: string,
-  message: string,
-  details?: string | readonly string[],
-): string {
-  const head = `${emoji} ${ensureTerminalPunctuation(message)}`;
-  if (details === undefined) return head;
-  const body =
-    typeof details === "string"
-      ? ensureTerminalPunctuation(details)
-      : details.map((line) => ensureTerminalPunctuation(line)).filter((line) => line.length > 0).join("\n");
-  return body.length > 0 ? `${head}\n${body}` : head;
+function formatActionDescription(emoji: string, message: string): string {
+  return `${emoji} ${ensureTerminalPunctuation(message)}`;
 }

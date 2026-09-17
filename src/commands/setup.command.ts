@@ -75,7 +75,7 @@ const setupCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse("Error setting Join to Create System", "Setup is not ready yet.")
+        embeds: failureResponse("Setup is not ready yet.")
           .embeds,
         ephemeral: true,
       });

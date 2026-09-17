@@ -64,8 +64,8 @@ describe("/setup command", () => {
     };
 
     await setup.execute(baseInteraction({ memberPermissions: "0" }));
-    expect(replies[0]).toMatch(/Error setting Join to Create System/i);
     expect(replies[0]).toMatch(/Lack of permission on client or user side/i);
+    expect(replies[0]).toContain("<:error:1543407530380624037>");
   });
 
   test("creates category and lobby channels then saves guild config", async () => {
@@ -139,9 +139,6 @@ describe("/setup command", () => {
     await setup.execute(baseInteraction());
 
     expect(controls.deleteCalls.length).toBeGreaterThanOrEqual(1);
-    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /Error setting Join to Create System/i,
-    );
     expect(lastEmbedDescription(controls.editedInteractions)).toContain(
       "<:error:1543407530380624037>",
     );
@@ -160,9 +157,6 @@ describe("/setup command", () => {
       }),
     );
 
-    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /Error setting Join to Create System/i,
-    );
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
       /Join to Create System already exists/i,
     );

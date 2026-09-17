@@ -7,28 +7,23 @@ import {
 } from "../src/lib/j2c/action-response.ts";
 
 describe("action-response", () => {
-  test("formats success embed with emoji message and no color", () => {
+  test("formats success embed as a single emoji line", () => {
     const message = successResponse("Setup Complete");
     expect(message.embeds).toHaveLength(1);
     expect(message.embeds[0]?.description).toBe(`${ACTION_EMOJIS.success} Setup Complete.`);
     expect(message.embeds[0]).not.toHaveProperty("color");
   });
 
-  test("formats failure embed with details", () => {
-    const message = failureResponse(
-      "Error setting Join to Create System",
-      "Lack of permission on client or user side.",
-    );
+  test("formats failure embed as a single emoji line", () => {
+    const message = failureResponse("Lack of permission on client or user side");
     expect(message.embeds[0]?.description).toBe(
-      `${ACTION_EMOJIS.error} Error setting Join to Create System.\nLack of permission on client or user side.`,
+      `${ACTION_EMOJIS.error} Lack of permission on client or user side.`,
     );
     expect(message.embeds[0]).not.toHaveProperty("color");
   });
 
-  test("joins detail lines and drops blanks", () => {
-    const message = successResponse("Factory Reset Complete", ["Line one", "", "Line two"]);
-    expect(message.embeds[0]?.description).toBe(
-      `${ACTION_EMOJIS.success} Factory Reset Complete.\nLine one.\nLine two.`,
-    );
+  test("does not add a second period when message already ends with punctuation", () => {
+    const message = successResponse("Channel locked.");
+    expect(message.embeds[0]?.description).toBe(`${ACTION_EMOJIS.success} Channel locked.`);
   });
 });

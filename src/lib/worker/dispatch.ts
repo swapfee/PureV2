@@ -136,10 +136,7 @@ export function createInteractionDispatcher(
           await discord.respondToInteraction({
             interactionId: interaction.id,
             interactionToken: interaction.token,
-            embeds: failureResponse(
-              "Action Failed",
-              `Please wait ${Math.ceil(decision.remainingMs / 1000)}s before using this command again.`,
-            ).embeds,
+            embeds: failureResponse(`Please wait ${Math.ceil(decision.remainingMs / 1000)}s before using this command again.`).embeds,
             ephemeral: true,
           });
           return;

@@ -124,10 +124,7 @@ const vcCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse(
-          "Action Failed",
-          "Voice channel management is not ready yet.",
-        ).embeds,
+        embeds: failureResponse("Voice channel management is not ready yet.").embeds,
         ephemeral: true,
       });
       return;

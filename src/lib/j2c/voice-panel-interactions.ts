@@ -213,7 +213,7 @@ export function createVoicePanelInteractionHandler(options: {
             discord,
             interaction,
             replyState,
-            failureResponse("Action Failed", "Something went wrong. Try again shortly."),
+            failureResponse("Something went wrong. Try again shortly."),
           );
         } catch {
           // ignore secondary failure
@@ -251,7 +251,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", access.reason),
+        failureResponse(access.reason),
       );
       return;
     }
@@ -260,7 +260,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", "You must own this voice channel to use its controls."),
+        failureResponse("You must own this voice channel to use its controls."),
       );
       return;
     }
@@ -289,7 +289,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("Action Failed", access.reason),
+      failureResponse(access.reason),
     );
     return;
   }
@@ -299,7 +299,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("Action Failed", "You must own this voice channel to use its controls."),
+      failureResponse("You must own this voice channel to use its controls."),
     );
     return;
   }
@@ -311,30 +311,23 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Info Failed", "Could not load channel details."),
+        failureResponse("Could not load channel details."),
       );
       return;
     }
     const hidden = isViewDenied(channel.value.permissionOverwrites, access.record.guildId);
     const lockedDiscord = isConnectDenied(channel.value.permissionOverwrites, access.record.guildId);
+    const limit =
+      channel.value.userLimit === undefined || channel.value.userLimit === 0
+        ? "Unlimited"
+        : String(channel.value.userLimit);
     await replyEphemeral(
       input.discord,
       input.interaction,
       input.replyState,
-      {
-        embeds: [
-          {
-            description: [
-              `Channel Info.`,
-              `Owner: <@${access.record.ownerId}>`,
-              `Name: \`${channel.value.name ?? "unknown"}\``,
-              `User limit: ${channel.value.userLimit === undefined || channel.value.userLimit === 0 ? "Unlimited" : String(channel.value.userLimit)}`,
-              `Locked: ${access.record.locked || lockedDiscord ? "Yes" : "No"}`,
-              `Hidden: ${hidden ? "Yes" : "No"}`,
-            ].join("\n"),
-          },
-        ],
-      },
+      successResponse(
+        `Owner <@${access.record.ownerId}> · \`${channel.value.name ?? "unknown"}\` · limit ${limit} · locked ${access.record.locked || lockedDiscord ? "Yes" : "No"} · hidden ${hidden ? "Yes" : "No"}`,
+      ),
     );
     return;
   }
@@ -346,7 +339,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", "Could not load channel permissions."),
+        failureResponse("Could not load channel permissions."),
       );
       return;
     }
@@ -363,10 +356,7 @@ async function handlePanelButton(input: {
         input.discord,
         input.interaction,
         input.replyState,
-        failureResponse(
-          wantLocked ? "Lock Failed" : "Unlock Failed",
-          wantLocked ? "The channel is already locked." : "The channel is already unlocked.",
-        ),
+        failureResponse(wantLocked ? "The channel is already locked." : "The channel is already unlocked."),
       );
       return;
     }
@@ -383,7 +373,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", `Could not ${action} the channel.`),
+        failureResponse(`Could not ${action} the channel.`),
       );
       return;
     }
@@ -404,7 +394,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", "Could not load channel permissions."),
+        failureResponse("Could not load channel permissions."),
       );
       return;
     }
@@ -420,10 +410,7 @@ async function handlePanelButton(input: {
         input.discord,
         input.interaction,
         input.replyState,
-        failureResponse(
-          wantHidden ? "Hide Failed" : "Unhide Failed",
-          wantHidden ? "The channel is already hidden." : "The channel is already visible.",
-        ),
+        failureResponse(wantHidden ? "The channel is already hidden." : "The channel is already visible."),
       );
       return;
     }
@@ -440,7 +427,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Action Failed", `Could not ${action} the channel.`),
+        failureResponse(`Could not ${action} the channel.`),
       );
       return;
     }
@@ -462,7 +449,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Transfer Failed", "No other members are connected to transfer to."),
+        failureResponse("No other members are connected to transfer to."),
       );
       return;
     }
@@ -482,7 +469,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Claim Failed", "You already own this channel."),
+        failureResponse("You already own this channel."),
       );
       return;
     }
@@ -495,7 +482,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Claim Failed", "The owner is still connected to this channel."),
+        failureResponse("The owner is still connected to this channel."),
       );
       return;
     }
@@ -505,7 +492,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Claim Failed", "Ownership is not available to claim yet."),
+        failureResponse("Ownership is not available to claim yet."),
       );
       return;
     }
@@ -516,10 +503,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse(
-          "Claim Failed",
-          `You can claim ownership in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
-        ),
+        failureResponse(`You can claim ownership in about ${minutes} minute${minutes === 1 ? "" : "s"}.`),
       );
       return;
     }
@@ -529,7 +513,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Claim Failed", "Could not claim ownership."),
+        failureResponse("Could not claim ownership."),
       );
       return;
     }
@@ -549,7 +533,7 @@ async function handlePanelButton(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      successResponse("Claim Complete", "You are now the channel owner."),
+      successResponse("You are now the channel owner."),
     );
     return;
   }
@@ -593,7 +577,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("Action Failed", access.reason),
+      failureResponse(access.reason),
     );
     return;
   }
@@ -602,7 +586,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      failureResponse("Action Failed", "You must own this voice channel to use its controls."),
+      failureResponse("You must own this voice channel to use its controls."),
     );
     return;
   }
@@ -615,7 +599,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Rename Failed", "Name must be 1–100 characters."),
+        failureResponse("Name must be 1–100 characters."),
       );
       return;
     }
@@ -625,7 +609,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Rename Failed", `The channel is already named \`${name}\`.`),
+        failureResponse(`The channel is already named \`${name}\`.`),
       );
       return;
     }
@@ -640,7 +624,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Rename Failed", "Could not rename the channel."),
+        failureResponse("Could not rename the channel."),
       );
       return;
     }
@@ -648,7 +632,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      successResponse("Rename Complete", `Channel renamed to \`${name}\`.`),
+      successResponse(`Channel renamed to \`${name}\`.`),
     );
     return;
   }
@@ -659,7 +643,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Limit Failed", "Limit must be an integer from 0 to 99."),
+        failureResponse("Limit must be an integer from 0 to 99."),
       );
       return;
     }
@@ -669,7 +653,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Limit Failed", "Limit must be an integer from 0 to 99."),
+        failureResponse("Limit must be an integer from 0 to 99."),
       );
       return;
     }
@@ -681,12 +665,9 @@ async function handleModalSubmit(input: {
           input.discord,
           input.interaction,
           input.replyState,
-          failureResponse(
-            "Limit Failed",
-            amount === 0
+          failureResponse(amount === 0
               ? "The channel limit is already unlimited."
-              : `The channel limit is already ${amount}.`,
-          ),
+              : `The channel limit is already ${amount}.`),
         );
         return;
       }
@@ -702,7 +683,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-        failureResponse("Limit Failed", "Could not update the user limit."),
+        failureResponse("Could not update the user limit."),
       );
       return;
     }
@@ -710,10 +691,7 @@ async function handleModalSubmit(input: {
       input.discord,
       input.interaction,
       input.replyState,
-      successResponse(
-        "Limit Complete",
-        amount === 0 ? "User limit removed." : `User limit set to ${amount}.`,
-      ),
+      successResponse(amount === 0 ? "User limit removed." : `User limit set to ${amount}.`),
     );
   }
 }
@@ -743,10 +721,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(
-        "Transfer Failed",
-        access.ok ? "You must own this voice channel to use its controls." : access.reason,
-      ).embeds,
+      embeds: failureResponse(access.ok ? "You must own this voice channel to use its controls." : access.reason).embeds,
       components: [],
     });
     return;
@@ -757,7 +732,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse("Transfer Failed", "Select a member to transfer ownership to.").embeds,
+      embeds: failureResponse("Select a member to transfer ownership to.").embeds,
       components: [],
     });
     return;
@@ -766,7 +741,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse("Transfer Failed", "You already own this channel.").embeds,
+      embeds: failureResponse("You already own this channel.").embeds,
       components: [],
     });
     return;
@@ -777,7 +752,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse("Transfer Failed", "Select a non-bot member.").embeds,
+      embeds: failureResponse("Select a non-bot member.").embeds,
       components: [],
     });
     return;
@@ -791,10 +766,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(
-        "Transfer Failed",
-        "That member must be connected to this channel.",
-      ).embeds,
+      embeds: failureResponse("That member must be connected to this channel.").embeds,
       components: [],
     });
     return;
@@ -805,10 +777,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(
-        "Transfer Failed",
-        "Could not transfer ownership. The member may already own another channel.",
-      ).embeds,
+      embeds: failureResponse("Could not transfer ownership. The member may already own another channel.").embeds,
       components: [],
     });
     return;
@@ -830,7 +799,7 @@ async function handleTransferSelect(input: {
   await input.discord.editInteractionResponse({
     applicationId: input.interaction.applicationId,
     interactionToken: input.interaction.token,
-    embeds: successResponse("Transfer Complete", `Ownership transferred to <@${targetUserId}>.`)
+    embeds: successResponse(`Ownership transferred to <@${targetUserId}>.`)
       .embeds,
     components: [],
   });
@@ -859,10 +828,7 @@ async function handleDeleteConfirm(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse(
-        choice === "cancel" ? "Cancel Failed" : "Delete Failed",
-        access.ok ? "You must own this voice channel to use its controls." : access.reason,
-      ).embeds,
+      embeds: failureResponse(access.ok ? "You must own this voice channel to use its controls." : access.reason).embeds,
       components: [],
     });
     input.replyState.answered = true;
@@ -890,7 +856,7 @@ async function handleDeleteConfirm(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse("Delete Failed", "Could not delete the channel.").embeds,
+      embeds: failureResponse("Could not delete the channel.").embeds,
       components: [],
     });
     input.replyState.answered = true;
