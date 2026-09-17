@@ -7,90 +7,19 @@ import {
 import type { CommandModule } from "../handlers/types.ts";
 import { failureResponse } from "../lib/j2c/action-response.ts";
 
+/**
+ * Discord requires a subcommand whenever any subcommand exists, so the
+ * automatic install path is `/setup` with no nested options via the `create`
+ * subcommand (shown first). Config remains `/setup config`.
+ */
 const setupCommandData: CreateApplicationCommand = {
   name: "setup",
-  description: "Configure Join-to-Create for this server",
+  description: "Set up or configure Join to Create for this server",
   options: [
     {
       type: ApplicationCommandOptionTypes.SubCommand,
-      name: "automatic",
+      name: "create",
       description: "Automatically create a category and Join to Create channel",
-    },
-    {
-      type: ApplicationCommandOptionTypes.SubCommand,
-      name: "default",
-      description: "Create a Join to Create channel with username-based names",
-      options: [
-        {
-          type: ApplicationCommandOptionTypes.Boolean,
-          name: "editable",
-          description: "Do you want the channel to be editable by the user?",
-          required: true,
-        },
-        {
-          type: ApplicationCommandOptionTypes.Channel,
-          name: "category",
-          description: "The category you want the channels to be created in",
-          required: false,
-          channelTypes: [ChannelTypes.GuildCategory],
-        },
-        {
-          type: ApplicationCommandOptionTypes.String,
-          name: "permission",
-          description: "Copy category permissions or Join to Create permissions?",
-          required: false,
-          choices: [
-            { name: "Category", value: "category" },
-            { name: "Join to Create", value: "lobby" },
-          ],
-        },
-      ],
-    },
-    {
-      type: ApplicationCommandOptionTypes.SubCommand,
-      name: "sequence",
-      description: "Create sequential channels that increment as more are made",
-      options: [
-        {
-          type: ApplicationCommandOptionTypes.String,
-          name: "name",
-          description: "Base name for sequential channels",
-          required: true,
-          minLength: 1,
-          maxLength: 100,
-        },
-        {
-          type: ApplicationCommandOptionTypes.Integer,
-          name: "limit",
-          description: "User limit for created channels (0-99)",
-          required: true,
-          minValue: 0,
-          maxValue: 99,
-        },
-        {
-          type: ApplicationCommandOptionTypes.Boolean,
-          name: "editable",
-          description: "Do you want the channel to be editable by the user?",
-          required: true,
-        },
-        {
-          type: ApplicationCommandOptionTypes.Channel,
-          name: "category",
-          description: "The category you want the channels to be created in",
-          required: false,
-          channelTypes: [ChannelTypes.GuildCategory],
-        },
-        {
-          type: ApplicationCommandOptionTypes.String,
-          name: "permission",
-          description: "Copy category permissions or Join to Create permissions?",
-          required: false,
-          choices: [
-            { name: "Category", value: "category" },
-            { name: "Join to Create", value: "lobby" },
-          ],
-        },
-      ],
     },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
@@ -113,7 +42,8 @@ const setupCommandData: CreateApplicationCommand = {
         {
           type: ApplicationCommandOptionTypes.String,
           name: "name",
-          description: "Base name for sequential channels",
+          description:
+            "Temp channel name template (use {username} for display name / username)",
           required: false,
           minLength: 1,
           maxLength: 100,
@@ -129,7 +59,7 @@ const setupCommandData: CreateApplicationCommand = {
         {
           type: ApplicationCommandOptionTypes.Channel,
           name: "category",
-          description: "The category you want the channels to be created in",
+          description: "The category you want temporary channels created in",
           required: false,
           channelTypes: [ChannelTypes.GuildCategory],
         },

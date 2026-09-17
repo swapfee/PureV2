@@ -25,7 +25,7 @@ function baseInteraction(
     userId: "223456789012345678",
     memberPermissions: String(BitwisePermissionFlags.MANAGE_GUILD),
     commandName: "setup",
-    options: [{ name: "automatic", type: 1, options: [] }],
+    options: [{ name: "create", type: 1, options: [] }],
     ...overrides,
   };
 }
@@ -68,7 +68,7 @@ describe("/setup command", () => {
     expect(replies[0]).toContain("<:error:1543407530380624037>");
   });
 
-  test("/setup automatic creates category and lobby then saves guild config", async () => {
+  test("/setup create creates category and lobby then saves guild config", async () => {
     const { setup, controls, configs } = createSetupDeps();
 
     await setup.execute(baseInteraction());
@@ -104,74 +104,14 @@ describe("/setup command", () => {
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
   });
 
-  test("/setup default uses an existing category and stores editable + permission", async () => {
-    const { setup, controls, configs } = createSetupDeps();
-    const categoryId = "444444444444444444";
-    controls.channels.set(categoryId, {
-      id: categoryId,
-      name: "Custom Category",
-      type: ChannelTypes.GuildCategory,
-      guildId: "123456789012345678",
-      permissionOverwrites: [],
-    });
-
-    await setup.execute(
-      baseInteraction({
-        options: [
-          {
-            name: "default",
-            type: 1,
-            options: [
-              { name: "editable", type: 5, value: true },
-              { name: "category", type: 7, value: categoryId },
-              { name: "permission", type: 3, value: "lobby" },
-            ],
-          },
-        ],
-      }),
-    );
-
-    expect(controls.guildChannelCreates).toHaveLength(1);
-    expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildVoice);
-    expect(controls.guildChannelCreates[0]?.parentId).toBe(categoryId);
-
-    const saved = await configs.findByGuildId("123456789012345678");
-    expect(saved?.categoryId).toBe(categoryId);
-    expect(saved?.ownerCanEdit).toBe(true);
-    expect(saved?.permissionSource).toBe("lobby");
-    expect(saved?.namingMode).toBe("template");
-    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
-  });
-
-  test("/setup sequence stores sequential naming and limit", async () => {
+  test("/setup with no subcommand options still creates", async () => {
     const { setup, configs, controls } = createSetupDeps();
-
-    await setup.execute(
-      baseInteraction({
-        options: [
-          {
-            name: "sequence",
-            type: 1,
-            options: [
-              { name: "name", type: 3, value: "Gaming" },
-              { name: "limit", type: 4, value: 5 },
-              { name: "editable", type: 5, value: false },
-            ],
-          },
-        ],
-      }),
-    );
-
-    const saved = await configs.findByGuildId("123456789012345678");
-    expect(saved?.namingMode).toBe("sequence");
-    expect(saved?.channelNameTemplate).toBe("Gaming");
-    expect(saved?.defaultUserLimit).toBe(5);
-    expect(saved?.ownerCanEdit).toBe(false);
-    expect(saved?.sequenceNext).toBe(1);
+    await setup.execute(baseInteraction({ options: [] }));
+    expect(await configs.findByGuildId("123456789012345678")).toBeDefined();
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
   });
 
-  test("/setup config updates settings for the lobby channel", async () => {
+  test("/setup config updates settings with username template naming", async () => {
     const { setup, configs, controls } = createSetupDeps();
     await setup.execute(baseInteraction());
     const saved = await configs.findByGuildId("123456789012345678");
@@ -187,7 +127,7 @@ describe("/setup command", () => {
             options: [
               { name: "channel", type: 3, value: saved!.lobbyChannelId },
               { name: "editable", type: 5, value: true },
-              { name: "name", type: 3, value: "Room" },
+              { name: "name", type: 3, value: "{username}'s room" },
               { name: "limit", type: 4, value: 8 },
               { name: "permission", type: 3, value: "lobby" },
             ],
@@ -198,8 +138,8 @@ describe("/setup command", () => {
 
     const updated = await configs.findByGuildId("123456789012345678");
     expect(updated?.ownerCanEdit).toBe(true);
-    expect(updated?.namingMode).toBe("sequence");
-    expect(updated?.channelNameTemplate).toBe("Room");
+    expect(updated?.namingMode).toBe("template");
+    expect(updated?.channelNameTemplate).toBe("{username}'s room");
     expect(updated?.defaultUserLimit).toBe(8);
     expect(updated?.permissionSource).toBe("lobby");
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
@@ -296,7 +236,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         id: "987654321098765433",
-        options: [{ name: "automatic", type: 1, options: [] }],
+        options: [{ name: "create", type: 1, options: [] }],
       }),
     );
 
@@ -479,7 +419,16 @@ describe("/setup command", () => {
   });
 });
 
-describe("sequential channel names", () => {
+describe("channel name templates", () => {
+  test("renderChannelName substitutes username and display-name aliases", async () => {
+    const { renderChannelName } = await import("../src/lib/j2c/channel-name.ts");
+    expect(renderChannelName("{username}'s channel", "Alice")).toBe("Alice's channel");
+    expect(renderChannelName("{displayname}'s room", "Bob")).toBe("Bob's room");
+    expect(renderChannelName("{display_name} VC", "Carol")).toBe("Carol VC");
+    expect(renderChannelName("{displayUsername} lounge", "Dan")).toBe("Dan lounge");
+    expect(renderChannelName("{user.username}'s place", "Eve")).toBe("Eve's place");
+  });
+
   test("renderSequentialChannelName appends the number", async () => {
     const { renderSequentialChannelName } = await import("../src/lib/j2c/channel-name.ts");
     expect(renderSequentialChannelName("Gaming", 1)).toBe("Gaming 1");

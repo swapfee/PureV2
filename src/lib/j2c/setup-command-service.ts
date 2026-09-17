@@ -1,6 +1,6 @@
 import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
 
-import type { GuildNamingMode, GuildPermissionSource } from "../../models/guild-config.ts";
+import type { GuildPermissionSource } from "../../models/guild-config.ts";
 import { DEFAULT_CHANNEL_NAME_TEMPLATE } from "../../models/snowflake.ts";
 import type { Logger } from "../logger.ts";
 import type {
@@ -39,7 +39,7 @@ const SETUP_SUCCESS_HEADLINE = "Setup Complete";
 const CONFIG_SUCCESS_HEADLINE = "Setup Updated";
 const RESET_SUCCESS_HEADLINE = "Factory Reset Complete";
 
-type SetupSubcommand = "automatic" | "default" | "sequence" | "config" | "create" | "reset";
+type SetupSubcommand = "create" | "config" | "reset";
 
 function optionValue(
   options: readonly InteractionOption[] | undefined,
@@ -60,19 +60,18 @@ function resolveSubcommand(
   }
 
   const root = options?.[0];
-  if (!root) return { name: undefined, options: [] };
-  if (
-    root.name === "automatic" ||
-    root.name === "default" ||
-    root.name === "sequence" ||
-    root.name === "config" ||
-    root.name === "create" ||
-    root.name === "reset"
-  ) {
+  if (!root) {
+    // Bare `/setup` (no subcommand payload) → automatic create.
+    return { name: "create", options: [] };
+  }
+  if (root.name === "config" || root.name === "create" || root.name === "reset") {
     return { name: root.name, options: root.options ?? [] };
   }
-  // Backward-compatible flat options (treat as automatic).
-  return { name: "automatic", options: options ?? [] };
+  // Legacy aliases from the removed automatic/default/sequence modes.
+  if (root.name === "automatic" || root.name === "default" || root.name === "sequence") {
+    return { name: "create", options: [] };
+  }
+  return { name: undefined, options: [] };
 }
 
 function hasManageGuild(permissions: string | undefined): boolean {
@@ -182,19 +181,9 @@ export function createSetupCommandService(options: {
       }
 
       const sub = resolveSubcommand(interaction.commandName, interaction.options);
-      // `/reset` command is routed here as a synthetic reset subcommand.
       const isReset = interaction.commandName === "reset" || sub.name === "reset";
-      if (
-        !isReset &&
-        sub.name !== "automatic" &&
-        sub.name !== "default" &&
-        sub.name !== "sequence" &&
-        sub.name !== "config" &&
-        sub.name !== "create"
-      ) {
-        await reply(
-          failureResponse("Use `/setup automatic`, `/setup default`, `/setup sequence`, or `/setup config`."),
-        );
+      if (!isReset && sub.name !== "create" && sub.name !== "config") {
+        await reply(failureResponse("Use `/setup` or `/setup config`."));
         return;
       }
 
@@ -266,14 +255,9 @@ export function createSetupCommandService(options: {
         return;
       }
 
-      const mode: "automatic" | "default" | "sequence" =
-        sub.name === "sequence" ? "sequence" : sub.name === "default" ? "default" : "automatic";
-
       await handleCreate({
         interaction,
         guildId,
-        mode,
-        subOptions: sub.options,
         finish,
       });
     },
@@ -282,73 +266,23 @@ export function createSetupCommandService(options: {
   async function handleCreate(input: {
     readonly interaction: InteractionCreatePayload;
     readonly guildId: string;
-    readonly mode: "automatic" | "default" | "sequence";
-    readonly subOptions: readonly InteractionOption[];
     readonly finish: (message: ActionMessage) => Promise<void>;
   }): Promise<void> {
-    const { interaction, guildId, mode, subOptions, finish } = input;
-
-    let ownerCanEdit = false;
-    let permissionSource: GuildPermissionSource = "category";
-    let namingMode: GuildNamingMode = "template";
-    let channelNameTemplate = DEFAULT_CHANNEL_NAME_TEMPLATE;
-    let defaultUserLimit: number | undefined;
-    let sequenceNext = 1;
-
-    if (mode === "default" || mode === "sequence") {
-      const editableRaw = optionValue(subOptions, "editable");
-      if (typeof editableRaw !== "boolean") {
-        await finish(failureResponse("Specify whether channels should be editable."));
-        return;
-      }
-      ownerCanEdit = editableRaw;
-      permissionSource = parsePermissionSource(optionValue(subOptions, "permission"));
-    }
-
-    if (mode === "sequence") {
-      const nameRaw = optionValue(subOptions, "name");
-      const limitRaw = optionValue(subOptions, "limit");
-      if (typeof nameRaw !== "string" || nameRaw.trim().length < 1) {
-        await finish(failureResponse("Specify a base name for sequential channels."));
-        return;
-      }
-      if (typeof limitRaw !== "number" || !Number.isInteger(limitRaw) || limitRaw < 0 || limitRaw > 99) {
-        await finish(failureResponse("Specify a user limit between 0 and 99."));
-        return;
-      }
-      namingMode = "sequence";
-      channelNameTemplate = normalizeSetupChannelName(nameRaw, "Channel");
-      defaultUserLimit = limitRaw;
-    }
-
-    const categoryOptionId = optionValue(subOptions, "category");
+    const { interaction, guildId, finish } = input;
     const setupReason = "PureV2 Join-to-Create setup";
 
-    let categoryId: string;
-    let createdCategory = false;
-
-    if (typeof categoryOptionId === "string") {
-      const categoryChannel = await discord.getChannel({ channelId: categoryOptionId });
-      if (categoryChannel.kind !== "found" || categoryChannel.value.type !== ChannelTypes.GuildCategory) {
-        await finish(failureResponse("Specify a valid category channel."));
-        return;
-      }
-      categoryId = categoryOptionId;
-    } else {
-      const categoryCreated = await discord.createGuildChannel({
-        guildId,
-        name: DEFAULT_SETUP_CATEGORY_NAME,
-        type: ChannelTypes.GuildCategory,
-        requestId: `setup:${interaction.id}:category`,
-        reason: setupReason,
-      });
-      if (categoryCreated.kind !== "found") {
-        await finish(createFailureMessage(categoryCreated, "create the category"));
-        return;
-      }
-      categoryId = categoryCreated.value.id;
-      createdCategory = true;
+    const categoryCreated = await discord.createGuildChannel({
+      guildId,
+      name: DEFAULT_SETUP_CATEGORY_NAME,
+      type: ChannelTypes.GuildCategory,
+      requestId: `setup:${interaction.id}:category`,
+      reason: setupReason,
+    });
+    if (categoryCreated.kind !== "found") {
+      await finish(createFailureMessage(categoryCreated, "create the category"));
+      return;
     }
+    const categoryId = categoryCreated.value.id;
 
     const lobbyCreated = await discord.createGuildChannel({
       guildId,
@@ -360,13 +294,11 @@ export function createSetupCommandService(options: {
     });
 
     if (lobbyCreated.kind !== "found") {
-      if (createdCategory) {
-        await discord.deleteChannel({
-          channelId: categoryId,
-          requestId: `setup:${interaction.id}:compensate-category`,
-          reason: setupReason,
-        });
-      }
+      await discord.deleteChannel({
+        channelId: categoryId,
+        requestId: `setup:${interaction.id}:compensate-category`,
+        reason: setupReason,
+      });
       await finish(createFailureMessage(lobbyCreated, "create the join-to-create voice channel"));
       return;
     }
@@ -379,12 +311,11 @@ export function createSetupCommandService(options: {
         enabled: true,
         lobbyChannelId,
         categoryId,
-        channelNameTemplate,
-        ...(defaultUserLimit === undefined ? {} : { defaultUserLimit }),
-        ownerCanEdit,
-        permissionSource,
-        namingMode,
-        sequenceNext,
+        channelNameTemplate: DEFAULT_CHANNEL_NAME_TEMPLATE,
+        ownerCanEdit: false,
+        permissionSource: "category",
+        namingMode: "template",
+        sequenceNext: 1,
         moderatorRoleIds: [],
       });
 
@@ -393,10 +324,7 @@ export function createSetupCommandService(options: {
         guildId: record.guildId,
         lobbyChannelId: record.lobbyChannelId,
         categoryId: record.categoryId,
-        mode,
         namingMode: record.namingMode,
-        ownerCanEdit: record.ownerCanEdit,
-        permissionSource: record.permissionSource,
         userId: interaction.userId,
       });
 
@@ -407,13 +335,11 @@ export function createSetupCommandService(options: {
         requestId: `setup:${interaction.id}:compensate-lobby`,
         reason: setupReason,
       });
-      if (createdCategory) {
-        await discord.deleteChannel({
-          channelId: categoryId,
-          requestId: `setup:${interaction.id}:compensate-category`,
-          reason: setupReason,
-        });
-      }
+      await discord.deleteChannel({
+        channelId: categoryId,
+        requestId: `setup:${interaction.id}:compensate-category`,
+        reason: setupReason,
+      });
 
       if (error instanceof GuildConfigValidationError) {
         await finish(failureResponse(error.message));
@@ -478,17 +404,15 @@ export function createSetupCommandService(options: {
         await finish(failureResponse("Specify a valid category channel."));
         return;
       }
+      // Category only controls where temporary VCs are created — do not move the lobby.
       categoryId = categoryRaw;
     }
 
     let namingMode = existing.namingMode;
     let channelNameTemplate = existing.channelNameTemplate;
-    let sequenceNext = existing.sequenceNext;
     if (typeof nameRaw === "string" && nameRaw.trim().length > 0) {
-      namingMode = "sequence";
+      namingMode = "template";
       channelNameTemplate = normalizeSetupChannelName(nameRaw, existing.channelNameTemplate);
-      // Keep the current counter so existing numbering continues.
-      sequenceNext = existing.sequenceNext;
     }
 
     let defaultUserLimit = existing.defaultUserLimit;
@@ -519,7 +443,7 @@ export function createSetupCommandService(options: {
           ownerCanEdit,
           permissionSource,
           namingMode,
-          sequenceNext,
+          sequenceNext: existing.sequenceNext,
           moderatorRoleIds: [...existing.moderatorRoleIds],
         }),
       );

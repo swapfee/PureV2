@@ -1,10 +1,19 @@
-const USERNAME_TOKEN = "{username}";
+const USERNAME_TOKENS = [
+  "{username}",
+  "{displayname}",
+  "{display_name}",
+  "{displayUsername}",
+  "{user.username}",
+] as const;
 
 export function renderChannelName(template: string, username: string): string {
   const safeName = username.trim().slice(0, 80) || "user";
-  const rendered = template.includes(USERNAME_TOKEN)
-    ? template.split(USERNAME_TOKEN).join(safeName)
-    : template;
+  let rendered = template;
+  for (const token of USERNAME_TOKENS) {
+    if (rendered.includes(token)) {
+      rendered = rendered.split(token).join(safeName);
+    }
+  }
   const trimmed = rendered.trim().slice(0, 100);
   return trimmed.length > 0 ? trimmed : `${safeName}'s channel`;
 }
