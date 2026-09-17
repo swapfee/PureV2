@@ -5,6 +5,7 @@ import type { TemporaryChannelRepository } from "./repositories.ts";
 import { deletionRequestId } from "./request-ids.ts";
 import type { Clock, ScheduledTask, TimerScheduler } from "./time.ts";
 import { systemClock, systemTimerScheduler } from "./time.ts";
+import { cancelPendingJoinRequestsForChannel } from "./vc-join-request.ts";
 import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
 
 export const EMPTY_CHANNEL_DELAY_MS = 3_000;
@@ -85,6 +86,11 @@ export function createDeletionLifecycle(options: {
     // Fresh Discord channel existence check (REST cannot list voice members).
     const channel = await options.discord.getChannel({ channelId });
     if (channel.kind === "missing") {
+      await cancelPendingJoinRequestsForChannel({
+        discord: options.discord,
+        channelId,
+        requestId: `j2c-delete-missing:${channelId}`,
+      });
       await options.channels.remove(channelId);
       options.metrics.increment("deletionSuccesses");
       await refreshActiveGauge();
@@ -119,6 +125,13 @@ export function createDeletionLifecycle(options: {
     if (!claimed) {
       return;
     }
+
+    // Cancel join requests while the channel (and request messages) may still exist.
+    await cancelPendingJoinRequestsForChannel({
+      discord: options.discord,
+      channelId,
+      requestId,
+    });
 
     const deleted = await options.discord.deleteChannel({
       channelId,

@@ -5,6 +5,7 @@ import type { J2cMetrics } from "./metrics.ts";
 import type { CreationReservationRepository, TemporaryChannelRepository } from "./repositories.ts";
 import type { Clock } from "./time.ts";
 import { systemClock } from "./time.ts";
+import { cancelPendingJoinRequestsForChannel } from "./vc-join-request.ts";
 import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
 
 export interface ReconciliationFinding {
@@ -95,6 +96,11 @@ export function createReconciler(options: {
       discordRequests += 1;
       const result = await options.discord.getChannel({ channelId });
       if (result.kind === "missing") {
+        await cancelPendingJoinRequestsForChannel({
+          discord: options.discord,
+          channelId,
+          requestId: `j2c-reconcile-missing:${channelId}`,
+        });
         await options.channels.remove(channelId);
         findings.push({ kind: "missing_discord_channel", channelId, guildId });
         options.metrics.increment("reconciliationFindings");
@@ -136,9 +142,15 @@ export function createReconciler(options: {
           findings.push({ kind: "stuck_deleting", channelId, guildId });
           options.metrics.increment("reconciliationFindings");
           discordRequests += 1;
+          const reconcileRequestId = `j2c-reconcile-delete:${channelId}`;
+          await cancelPendingJoinRequestsForChannel({
+            discord: options.discord,
+            channelId,
+            requestId: reconcileRequestId,
+          });
           const deleted = await options.discord.deleteChannel({
             channelId,
-            requestId: `j2c-reconcile-delete:${channelId}`,
+            requestId: reconcileRequestId,
             reason: "j2c reconciliation",
           });
           if (deleted.kind === "ok" || deleted.kind === "missing") {

@@ -35,6 +35,7 @@ import {
 import {
   approveJoinRequest,
   buildJoinRequestComponents,
+  cancelPendingJoinRequestsForChannel,
   consumePendingJoinRequest,
   finalizeJoinRequestMessage,
   formatJoinRequestResolvedMessage,
@@ -1157,9 +1158,15 @@ async function handleDeleteConfirm(input: {
     return;
   }
 
+  const requestId = `panel:delete:${input.interaction.id}`;
+  await cancelPendingJoinRequestsForChannel({
+    discord: input.discord,
+    channelId,
+    requestId,
+  });
   const deleted = await input.discord.deleteChannel({
     channelId,
-    requestId: `panel:delete:${input.interaction.id}`,
+    requestId,
     reason: "panel delete",
   });
   if (deleted.kind !== "ok" && deleted.kind !== "missing") {

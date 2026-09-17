@@ -45,6 +45,7 @@ import {
   buildJoinRequestComponents,
   buildJoinRequestKey,
   channelIsLockedForJoinRequests,
+  cancelPendingJoinRequestsForChannel,
   finalizeJoinRequestMessage,
   formatJoinRequestMessage,
   hasPendingJoinRequest,
@@ -1563,6 +1564,11 @@ export function createVcCommandService(options: {
         }
 
         if (subcommand === "delete") {
+          await cancelPendingJoinRequestsForChannel({
+            discord: options.discord,
+            channelId: auth.channel.channelId,
+            requestId,
+          });
           const deleted = await options.discord.deleteChannel({
             channelId: auth.channel.channelId,
             requestId,

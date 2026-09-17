@@ -7,6 +7,7 @@ import type {
   GuildConfigRepository,
   TemporaryChannelRepository,
 } from "./repositories.ts";
+import { cancelPendingJoinRequestsForChannel } from "./vc-join-request.ts";
 import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
 
 export interface FactoryResetResult {
@@ -72,9 +73,15 @@ export async function runFactoryReset(options: {
       continue;
     }
 
+    const resetRequestId = `setup-reset:${options.interactionId}:temp:${record.channelId}`;
+    await cancelPendingJoinRequestsForChannel({
+      discord: options.discord,
+      channelId: record.channelId,
+      requestId: resetRequestId,
+    });
     const deleted = await options.discord.deleteChannel({
       channelId: record.channelId,
-      requestId: `setup-reset:${options.interactionId}:temp:${record.channelId}`,
+      requestId: resetRequestId,
       reason,
     });
     if (deleted.kind === "ok" || deleted.kind === "missing") {

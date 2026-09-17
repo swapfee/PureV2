@@ -106,7 +106,7 @@ export function formatJoinRequestMessage(options: {
 export function formatJoinRequestResolvedMessage(options: {
   readonly requesterId: string;
   readonly ownerId: string;
-  readonly outcome: "approved" | "declined" | "expired";
+  readonly outcome: "approved" | "declined" | "expired" | "cancelled";
 }): string {
   if (options.outcome === "approved") {
     return [
@@ -118,6 +118,12 @@ export function formatJoinRequestResolvedMessage(options: {
     return [
       "**Join request declined**",
       `<@${options.ownerId}> declined access for <@${options.requesterId}>.`,
+    ].join("\n");
+  }
+  if (options.outcome === "cancelled") {
+    return [
+      "**Join request cancelled**",
+      `The voice channel was deleted before a decision was made for <@${options.requesterId}>.`,
     ].join("\n");
   }
   return [
@@ -246,6 +252,65 @@ export function consumePendingJoinRequest(options: {
   return snapshot;
 }
 
+/** Take every pending join request for a channel (clears timers/store). */
+export function consumePendingJoinRequestsForChannel(
+  channelId: string,
+): readonly PendingJoinRequest[] {
+  const toConsume: StoredJoinRequest[] = [];
+  for (const pending of pendingByKey.values()) {
+    if (pending.channelId === channelId && pending.status === "pending") {
+      toConsume.push(pending);
+    }
+  }
+
+  const snapshots: PendingJoinRequest[] = [];
+  for (const pending of toConsume) {
+    pending.status = "resolved";
+    snapshots.push({
+      requestKey: pending.requestKey,
+      guildId: pending.guildId,
+      channelId: pending.channelId,
+      ownerId: pending.ownerId,
+      requesterId: pending.requesterId,
+      messageId: pending.messageId,
+      expiresAt: pending.expiresAt,
+    });
+    clearPending(pending.requestKey);
+  }
+  return snapshots;
+}
+
+/**
+ * Cancel all pending join requests for a temporary channel that is being deleted.
+ * Clears the in-memory store/timers and best-effort edits request messages to a
+ * cancelled state with disabled buttons. Missing channel/message edits are OK.
+ */
+export async function cancelPendingJoinRequestsForChannel(options: {
+  readonly discord: DiscordApiPort;
+  readonly channelId: string;
+  readonly requestId: string;
+}): Promise<void> {
+  const pending = consumePendingJoinRequestsForChannel(options.channelId);
+  for (const request of pending) {
+    try {
+      const result = await finalizeJoinRequestMessage({
+        discord: options.discord,
+        channelId: request.channelId,
+        messageId: request.messageId,
+        requesterId: request.requesterId,
+        ownerId: request.ownerId,
+        expiresAt: request.expiresAt,
+        outcome: "cancelled",
+        requestId: `${options.requestId}:join-req:${request.requestKey}`,
+      });
+      // Channel or message may already be gone after deletion — treat as success.
+      if (result.kind === "ok" || result.kind === "missing") continue;
+    } catch {
+      // Non-fatal: pending state is already cleared.
+    }
+  }
+}
+
 /** Test helper: drop all pending join requests and timers. */
 export function resetJoinRequestStoreForTests(): void {
   for (const pending of pendingByKey.values()) {
@@ -334,7 +399,7 @@ export async function finalizeJoinRequestMessage(options: {
   readonly requesterId: string;
   readonly ownerId: string;
   readonly expiresAt: number;
-  readonly outcome: "approved" | "declined" | "expired";
+  readonly outcome: "approved" | "declined" | "expired" | "cancelled";
   readonly requestId: string;
 }): Promise<DiscordOperationResult> {
   return options.discord.editChannelMessage({
