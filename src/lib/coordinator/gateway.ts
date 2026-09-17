@@ -90,6 +90,12 @@ export function createCoordinatorGateway(options: CoordinatorGatewayOptions): Co
         token: options.token,
         intents: COORDINATOR_INTENTS,
         connection,
+        // Identify as the iOS client so Discord shows the mobile online indicator.
+        properties: {
+          os: "iOS",
+          browser: "Discord iOS",
+          device: "Discord iOS",
+        },
         // Keep shards in this process; workers only process events.
         totalWorkers: 1,
         shardsPerWorker: connection.shards,
