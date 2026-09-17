@@ -98,11 +98,11 @@ const setupCommandData: CreateApplicationCommand = {
       description: "Modify an existing setup's settings",
       options: [
         {
-          type: ApplicationCommandOptionTypes.Channel,
+          type: ApplicationCommandOptionTypes.String,
           name: "channel",
           description: "The Join to Create channel to configure",
           required: true,
-          channelTypes: [ChannelTypes.GuildVoice],
+          autocomplete: true,
         },
         {
           type: ApplicationCommandOptionTypes.Boolean,

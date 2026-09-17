@@ -2,6 +2,7 @@ export interface InteractionOption {
   readonly name: string;
   readonly type: number;
   readonly value?: string | number | boolean;
+  readonly focused?: boolean;
   readonly options?: readonly InteractionOption[];
 }
 
@@ -64,6 +65,17 @@ export interface InteractionResponseRequest {
   readonly components?: readonly unknown[];
   readonly flags?: number;
   readonly ephemeral?: boolean;
+}
+
+export interface AutocompleteChoice {
+  readonly name: string;
+  readonly value: string;
+}
+
+export interface AutocompleteResponseRequest {
+  readonly interactionId: string;
+  readonly interactionToken: string;
+  readonly choices: readonly AutocompleteChoice[];
 }
 
 export interface EditInteractionResponseRequest {
@@ -144,6 +156,7 @@ export interface CreateGuildChannelRequest {
 
 export interface DiscordApiPort {
   respondToInteraction(request: InteractionResponseRequest): Promise<void>;
+  respondToAutocomplete(request: AutocompleteResponseRequest): Promise<void>;
   deferInteraction(request: {
     readonly interactionId: string;
     readonly interactionToken: string;

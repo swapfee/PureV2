@@ -121,6 +121,18 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       });
     },
 
+    async respondToAutocomplete(request) {
+      await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
+        type: InteractionResponseTypes.ApplicationCommandAutocompleteResult,
+        data: {
+          choices: request.choices.map((choice) => ({
+            name: choice.name.slice(0, 100),
+            value: choice.value,
+          })),
+        },
+      });
+    },
+
     async deferInteraction(request) {
       await bot.rest.sendInteractionResponse(request.interactionId, request.interactionToken, {
         type: InteractionResponseTypes.DeferredChannelMessageWithSource,

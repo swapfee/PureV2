@@ -94,6 +94,10 @@ export interface FakeDiscordControls {
     embeds?: readonly { description: string; color?: number; title?: string }[];
     components?: readonly unknown[];
   }[];
+  readonly autocompleteResponses: {
+    interactionId: string;
+    choices: readonly { name: string; value: string }[];
+  }[];
   currentUser?: { id: string; username: string };
   messageSequence: number;
   failNextCreate?: DiscordValueResult<{ id: string }>;
@@ -139,6 +143,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     deletedChannelMessages: [],
     editedInteractions: [],
     responses: [],
+    autocompleteResponses: [],
     messageSequence: seed?.messageSequence ?? 0,
     missingChannels: seed?.missingChannels ?? new Set(),
     createSequence: seed?.createSequence ?? 0,
@@ -169,6 +174,13 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
         ...(request.components === undefined ? {} : { components: request.components }),
+      });
+    },
+
+    async respondToAutocomplete(request) {
+      controls.autocompleteResponses.push({
+        interactionId: request.interactionId,
+        choices: [...request.choices],
       });
     },
 

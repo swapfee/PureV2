@@ -49,20 +49,24 @@ function mapInteractionOption(option: {
   readonly name: string;
   readonly type: number;
   readonly value?: string | number | boolean;
+  readonly focused?: boolean;
   readonly options?: readonly {
     readonly name: string;
     readonly type: number;
     readonly value?: string | number | boolean;
+    readonly focused?: boolean;
     readonly options?: readonly {
       readonly name: string;
       readonly type: number;
       readonly value?: string | number | boolean;
+      readonly focused?: boolean;
     }[];
   }[];
 }): InteractionOption {
   const mapped: InteractionOption = {
     name: option.name,
     type: option.type,
+    ...(option.focused === undefined ? {} : { focused: option.focused }),
   };
   const withValue = option.value === undefined ? mapped : { ...mapped, value: option.value };
   if (!option.options) return withValue;
@@ -108,7 +112,10 @@ export function createInteractionDispatcher(
   discord: DiscordApiPort,
   services?: {
     readonly vc?: { execute(interaction: InteractionCreatePayload): Promise<void> };
-    readonly setup?: { execute(interaction: InteractionCreatePayload): Promise<void> };
+    readonly setup?: {
+      execute(interaction: InteractionCreatePayload): Promise<void>;
+      autocomplete?(interaction: InteractionCreatePayload): Promise<void>;
+    };
     readonly voicePanel?: {
       handles(interaction: InteractionCreatePayload): boolean;
       execute(interaction: InteractionCreatePayload): Promise<void>;
@@ -119,6 +126,23 @@ export function createInteractionDispatcher(
     async dispatch(interaction: InteractionCreatePayload): Promise<void> {
       if (services?.voicePanel?.handles(interaction)) {
         await services.voicePanel.execute(interaction);
+        return;
+      }
+
+      // Application command autocomplete (type 4) — no cooldown, no defer.
+      if (interaction.type === 4) {
+        if (
+          (interaction.commandName === "setup" || interaction.commandName === "reset") &&
+          services?.setup?.autocomplete
+        ) {
+          await services.setup.autocomplete(interaction);
+        } else {
+          await discord.respondToAutocomplete({
+            interactionId: interaction.id,
+            interactionToken: interaction.token,
+            choices: [],
+          });
+        }
         return;
       }
 

@@ -25,6 +25,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("respondToInteraction is not available on the coordinator Discord port");
     },
 
+    async respondToAutocomplete() {
+      throw new Error("respondToAutocomplete is not available on the coordinator Discord port");
+    },
+
     async deferInteraction() {
       throw new Error("deferInteraction is not available on the coordinator Discord port");
     },

@@ -185,7 +185,7 @@ describe("/setup command", () => {
             name: "config",
             type: 1,
             options: [
-              { name: "channel", type: 7, value: saved!.lobbyChannelId },
+              { name: "channel", type: 3, value: saved!.lobbyChannelId },
               { name: "editable", type: 5, value: true },
               { name: "name", type: 3, value: "Room" },
               { name: "limit", type: 4, value: 8 },
@@ -205,6 +205,43 @@ describe("/setup command", () => {
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
   });
 
+  test("/setup config category only updates temp VC category without moving lobby", async () => {
+    const { setup, configs, controls } = createSetupDeps();
+    await setup.execute(baseInteraction());
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved).toBeDefined();
+
+    const otherCategoryId = "888888888888888888";
+    controls.channels.set(otherCategoryId, {
+      id: otherCategoryId,
+      name: "Other category",
+      type: ChannelTypes.GuildCategory,
+      guildId: "123456789012345678",
+      permissionOverwrites: [],
+    });
+
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765435",
+        options: [
+          {
+            name: "config",
+            type: 1,
+            options: [
+              { name: "channel", type: 3, value: saved!.lobbyChannelId },
+              { name: "category", type: 7, value: otherCategoryId },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const updated = await configs.findByGuildId("123456789012345678");
+    expect(updated?.categoryId).toBe(otherCategoryId);
+    expect(controls.editCalls.some((call) => call.channelId === saved!.lobbyChannelId)).toBe(false);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
+  });
+
   test("/setup config rejects a non-lobby channel", async () => {
     const { setup, controls } = createSetupDeps();
     await setup.execute(baseInteraction());
@@ -217,7 +254,7 @@ describe("/setup command", () => {
             name: "config",
             type: 1,
             options: [
-              { name: "channel", type: 7, value: "999999999999999999" },
+              { name: "channel", type: 3, value: "999999999999999999" },
               { name: "editable", type: 5, value: true },
             ],
           },
@@ -325,7 +362,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [{ name: "reset", type: 1, options: [] }],
+        options: [{ name: "channel", type: 3, value: config!.lobbyChannelId }],
       }),
     );
 
@@ -370,13 +407,75 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [{ name: "reset", type: 1, options: [] }],
+        options: [{ name: "channel", type: 3, value: config!.lobbyChannelId }],
       }),
     );
 
     expect(await configs.findByGuildId("123456789012345678")).toBeUndefined();
     expect(controls.channels.has(config!.categoryId)).toBe(false);
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
+  });
+
+  test("autocomplete for setup config and reset lists only the Join to Create lobby", async () => {
+    const { setup, configs, controls } = createSetupDeps();
+    await setup.execute(baseInteraction());
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved).toBeDefined();
+
+    const tempId = "444444444444444444";
+    controls.channels.set(tempId, {
+      id: tempId,
+      name: "User room",
+      type: ChannelTypes.GuildVoice,
+      guildId: "123456789012345678",
+      parentId: saved!.categoryId,
+      permissionOverwrites: [],
+    });
+
+    await setup.autocomplete(
+      baseInteraction({
+        type: 4,
+        options: [
+          {
+            name: "config",
+            type: 1,
+            options: [{ name: "channel", type: 3, value: "", focused: true }],
+          },
+        ],
+      }),
+    );
+    await setup.autocomplete(
+      baseInteraction({
+        type: 4,
+        commandName: "reset",
+        options: [{ name: "channel", type: 3, value: "", focused: true }],
+      }),
+    );
+
+    expect(controls.autocompleteResponses).toHaveLength(2);
+    for (const response of controls.autocompleteResponses) {
+      expect(response.choices).toEqual([
+        { name: DEFAULT_SETUP_LOBBY_NAME, value: saved!.lobbyChannelId },
+      ]);
+    }
+  });
+
+  test("reset rejects a managed temporary voice channel id", async () => {
+    const { setup, configs, controls } = createSetupDeps();
+    await setup.execute(baseInteraction());
+    const saved = await configs.findByGuildId("123456789012345678");
+    expect(saved).toBeDefined();
+
+    await setup.execute(
+      baseInteraction({
+        commandName: "reset",
+        options: [{ name: "channel", type: 3, value: "444444444444444444" }],
+      }),
+    );
+
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /not the Join to Create channel/i,
+    );
   });
 });
 
