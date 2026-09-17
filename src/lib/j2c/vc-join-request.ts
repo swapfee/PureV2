@@ -17,6 +17,8 @@ import { PANEL_EMOJIS } from "./voice-panel.ts";
 
 export const VC_JOIN_REQUEST_PREFIX = "vc-req";
 export const VC_JOIN_REQUEST_TTL_MS = 60_000;
+/** Delay before removing the resolved join-request message (approve/decline/expiry). */
+export const VC_JOIN_REQUEST_MESSAGE_DELETE_AFTER_MS = 5_000;
 
 const ComponentTypes = {
   ActionRow: 1,
@@ -49,6 +51,18 @@ interface StoredJoinRequest extends PendingJoinRequest {
 /** In-process pending join requests (expiry edits). Decision auth is encoded in custom_id. */
 const pendingByKey = new Map<string, StoredJoinRequest>();
 const pendingByRequesterChannel = new Map<string, string>();
+const messageDeleteTimers = new Set<ReturnType<typeof setTimeout>>();
+
+/** Test-only override for the post-resolve message delete delay. */
+let messageDeleteAfterMsForTests: number | undefined;
+
+export function setJoinRequestMessageDeleteAfterMsForTests(ms: number | undefined): void {
+  messageDeleteAfterMsForTests = ms;
+}
+
+function joinRequestMessageDeleteAfterMs(): number {
+  return messageDeleteAfterMsForTests ?? VC_JOIN_REQUEST_MESSAGE_DELETE_AFTER_MS;
+}
 
 function requesterChannelKey(channelId: string, requesterId: string): string {
   return `${channelId}:${requesterId}`;
@@ -335,6 +349,33 @@ export function resetJoinRequestStoreForTests(): void {
   }
   pendingByKey.clear();
   pendingByRequesterChannel.clear();
+  for (const timer of messageDeleteTimers) {
+    clearTimeout(timer);
+  }
+  messageDeleteTimers.clear();
+  messageDeleteAfterMsForTests = undefined;
+}
+
+function scheduleJoinRequestMessageDeletion(options: {
+  readonly discord: DiscordApiPort;
+  readonly channelId: string;
+  readonly messageId: string;
+  readonly requestId: string;
+}): void {
+  const timer = setTimeout(() => {
+    messageDeleteTimers.delete(timer);
+    void options.discord
+      .deleteChannelMessage({
+        channelId: options.channelId,
+        messageId: options.messageId,
+        requestId: options.requestId,
+      })
+      .catch(() => {
+        // Missing/forbidden after resolve is non-fatal.
+      });
+  }, joinRequestMessageDeleteAfterMs());
+  timer.unref?.();
+  messageDeleteTimers.add(timer);
 }
 
 export async function resolveManagedChannelTarget(options: {
@@ -419,7 +460,7 @@ export async function finalizeJoinRequestMessage(options: {
   readonly outcome: "approved" | "declined" | "expired" | "cancelled";
   readonly requestId: string;
 }): Promise<DiscordOperationResult> {
-  return options.discord.editChannelMessage({
+  const result = await options.discord.editChannelMessage({
     channelId: options.channelId,
     messageId: options.messageId,
     requestId: options.requestId,
@@ -440,4 +481,16 @@ export async function finalizeJoinRequestMessage(options: {
       }),
     ],
   });
+
+  // Channel-delete cancellation should not schedule a follow-up delete.
+  if (options.outcome !== "cancelled" && result.kind === "ok") {
+    scheduleJoinRequestMessageDeletion({
+      discord: options.discord,
+      channelId: options.channelId,
+      messageId: options.messageId,
+      requestId: `${options.requestId}:delete`,
+    });
+  }
+
+  return result;
 }

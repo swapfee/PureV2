@@ -80,6 +80,7 @@ export interface FakeDiscordControls {
     components?: readonly unknown[];
     flags?: number;
   }[];
+  readonly deletedChannelMessages: { channelId: string; messageId: string; requestId: string }[];
   readonly editedInteractions: {
     token: string;
     content?: string;
@@ -134,6 +135,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     modals: [],
     channelMessages: [],
     editedChannelMessages: [],
+    deletedChannelMessages: [],
     editedInteractions: [],
     responses: [],
     messageSequence: seed?.messageSequence ?? 0,
@@ -473,6 +475,15 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         delete controls.failNextEditMessage;
         return result;
       }
+      return { kind: "ok" };
+    },
+
+    async deleteChannelMessage(request) {
+      controls.deletedChannelMessages.push({
+        channelId: request.channelId,
+        messageId: request.messageId,
+        requestId: request.requestId,
+      });
       return { kind: "ok" };
     },
   };

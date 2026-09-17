@@ -527,6 +527,21 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         return toDiscordOperationResult(error);
       }
     },
+
+    async deleteChannelMessage(request) {
+      try {
+        await bot.rest.makeRequest(
+          "DELETE",
+          bot.rest.routes.channels.message(request.channelId, request.messageId),
+          {
+            headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+          },
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
   };
 
   return { bot, discord };

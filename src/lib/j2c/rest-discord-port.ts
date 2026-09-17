@@ -193,5 +193,9 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
     async editChannelMessage() {
       throw new Error("editChannelMessage is not available on the coordinator Discord port");
     },
+
+    async deleteChannelMessage() {
+      throw new Error("deleteChannelMessage is not available on the coordinator Discord port");
+    },
   };
 }

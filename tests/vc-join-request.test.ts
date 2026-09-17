@@ -16,6 +16,7 @@ import {
   hasPendingJoinRequest,
   registerPendingJoinRequest,
   resetJoinRequestStoreForTests,
+  setJoinRequestMessageDeleteAfterMsForTests,
   VC_JOIN_REQUEST_PREFIX,
   VC_JOIN_REQUEST_TTL_MS,
 } from "../src/lib/j2c/vc-join-request.ts";
@@ -128,9 +129,14 @@ async function setup(locked = true) {
   return { vc, voicePanel, controls, metrics, channels, logger };
 }
 
+async function waitForMessageDelete(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+}
+
 describe("/vc request join flow", () => {
   beforeEach(() => {
     resetJoinRequestStoreForTests();
+    setJoinRequestMessageDeleteAfterMsForTests(20);
   });
   afterEach(() => {
     resetJoinRequestStoreForTests();
@@ -262,6 +268,11 @@ describe("/vc request join flow", () => {
     expect(JSON.stringify(edited?.components)).toContain('"disabled":true');
     expect(JSON.stringify(edited?.components)).toContain('"label":"Approve"');
     expect(metrics.snapshot().successes.request).toBe(1);
+
+    await waitForMessageDelete();
+    expect(controls.deletedChannelMessages.some((entry) => entry.messageId === messageId)).toBe(
+      true,
+    );
   });
 
   test("owner decline disables buttons without permitting", async () => {
@@ -302,6 +313,11 @@ describe("/vc request join flow", () => {
 
     expect(controls.overwriteCalls.length).toBe(overwritesBefore);
     expect(controls.editedChannelMessages.at(-1)?.embeds?.[0]?.title).toMatch(/declined/i);
+
+    await waitForMessageDelete();
+    expect(controls.deletedChannelMessages.some((entry) => entry.messageId === messageId)).toBe(
+      true,
+    );
   });
 
   test("non-owner cannot approve", async () => {
@@ -369,6 +385,11 @@ describe("/vc request join flow", () => {
     expect(JSON.stringify(controls.editedChannelMessages.at(-1)?.components)).toContain(
       '"disabled":true',
     );
+
+    await waitForMessageDelete();
+    expect(controls.deletedChannelMessages.some((entry) => entry.messageId === messageId)).toBe(
+      true,
+    );
   });
 
   test("cancelPendingJoinRequestsForChannel clears store and disables buttons", async () => {
@@ -401,6 +422,9 @@ describe("/vc request join flow", () => {
     expect(edited?.embeds?.[0]?.title).toBe("Join request cancelled");
     expect(edited?.embeds?.[0]?.description).toContain(requesterId);
     expect(JSON.stringify(edited?.components)).toContain('"disabled":true');
+
+    await waitForMessageDelete();
+    expect(controls.deletedChannelMessages).toHaveLength(0);
   });
 
   test("cancel treats missing message edits as success", async () => {

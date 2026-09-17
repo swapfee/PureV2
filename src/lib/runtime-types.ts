@@ -269,4 +269,9 @@ export interface DiscordApiPort {
     readonly components?: readonly unknown[];
     readonly flags?: number;
   }): Promise<DiscordOperationResult>;
+  deleteChannelMessage(request: {
+    readonly channelId: string;
+    readonly messageId: string;
+    readonly requestId: string;
+  }): Promise<DiscordOperationResult>;
 }
