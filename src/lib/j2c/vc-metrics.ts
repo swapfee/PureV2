@@ -3,6 +3,10 @@ export type VcSubcommand =
   | "invite"
   | "rename"
   | "limit"
+  | "bitrate"
+  | "status"
+  | "nsfw"
+  | "region"
   | "lock"
   | "unlock"
   | "hide"
@@ -44,6 +48,10 @@ function emptySubcounts(): Record<VcSubcommand, number> {
     invite: 0,
     rename: 0,
     limit: 0,
+    bitrate: 0,
+    status: 0,
+    nsfw: 0,
+    region: 0,
     lock: 0,
     unlock: 0,
     hide: 0,

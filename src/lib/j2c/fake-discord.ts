@@ -15,12 +15,23 @@ export interface FakeDiscordChannel {
   type?: number;
   parentId?: string;
   userLimit?: number;
+  bitrate?: number;
+  nsfw?: boolean;
+  rtcRegion?: string | null;
+  status?: string | null;
   guildId: string;
   permissionOverwrites: PermissionOverwrite[];
 }
 
+export interface FakeDiscordGuild {
+  id: string;
+  premiumTier: number;
+  features: string[];
+}
+
 export interface FakeDiscordControls {
   readonly channels: Map<string, FakeDiscordChannel>;
+  readonly guilds: Map<string, FakeDiscordGuild>;
   readonly voiceByUser: Map<string, string | null>;
   /** guildId:userId -> server mute */
   readonly serverMuteByUser: Map<string, boolean>;
@@ -32,7 +43,16 @@ export interface FakeDiscordControls {
   readonly moveCalls: { guildId: string; userId: string; channelId: string | null; requestId: string }[];
   readonly muteCalls: { guildId: string; userId: string; mute: boolean; requestId: string }[];
   readonly dmCalls: { userId: string; content: string; requestId: string }[];
-  readonly editCalls: { channelId: string; requestId: string; name?: string; userLimit?: number }[];
+  readonly editCalls: {
+    channelId: string;
+    requestId: string;
+    name?: string;
+    userLimit?: number;
+    bitrate?: number;
+    nsfw?: boolean;
+    rtcRegion?: string | null;
+  }[];
+  readonly voiceStatusCalls: { channelId: string; requestId: string; status: string | null }[];
   readonly overwriteCalls: {
     channelId: string;
     overwriteId: string;
@@ -76,6 +96,7 @@ export interface FakeDiscordControls {
   failNextMute?: DiscordOperationResult;
   failNextDelete?: DiscordOperationResult;
   failNextEdit?: DiscordOperationResult;
+  failNextVoiceStatus?: DiscordOperationResult;
   failNextOverwrite?: DiscordOperationResult;
   failNextSendMessage?: DiscordValueResult<{ id: string }>;
   failNextEditMessage?: DiscordOperationResult;
@@ -90,6 +111,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
 } {
   const controls: FakeDiscordControls = {
     channels: seed?.channels ?? new Map(),
+    guilds: seed?.guilds ?? new Map(),
     voiceByUser: seed?.voiceByUser ?? new Map(),
     serverMuteByUser: seed?.serverMuteByUser ?? new Map(),
     users: seed?.users ?? new Map(),
@@ -101,6 +123,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     muteCalls: [],
     dmCalls: [],
     editCalls: [],
+    voiceStatusCalls: [],
     overwriteCalls: [],
     deferredInteractions: [],
     deferredUpdates: [],
@@ -118,8 +141,12 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       ? {}
       : { failNextGuildChannelCreate: seed.failNextGuildChannelCreate }),
     ...(seed?.failNextMove === undefined ? {} : { failNextMove: seed.failNextMove }),
+    ...(seed?.failNextMute === undefined ? {} : { failNextMute: seed.failNextMute }),
     ...(seed?.failNextDelete === undefined ? {} : { failNextDelete: seed.failNextDelete }),
     ...(seed?.failNextEdit === undefined ? {} : { failNextEdit: seed.failNextEdit }),
+    ...(seed?.failNextVoiceStatus === undefined
+      ? {}
+      : { failNextVoiceStatus: seed.failNextVoiceStatus }),
     ...(seed?.failNextOverwrite === undefined ? {} : { failNextOverwrite: seed.failNextOverwrite }),
     ...(seed?.failNextSendMessage === undefined ? {} : { failNextSendMessage: seed.failNextSendMessage }),
     ...(seed?.failNextEditMessage === undefined ? {} : { failNextEditMessage: seed.failNextEditMessage }),
@@ -236,7 +263,29 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
           name: channel.name,
           ...(channel.type === undefined ? {} : { type: channel.type }),
           ...(channel.userLimit === undefined ? {} : { userLimit: channel.userLimit }),
+          ...(channel.bitrate === undefined ? {} : { bitrate: channel.bitrate }),
+          ...(channel.nsfw === undefined ? {} : { nsfw: channel.nsfw }),
+          ...(channel.rtcRegion === undefined ? {} : { rtcRegion: channel.rtcRegion }),
+          ...(channel.status === undefined ? {} : { status: channel.status }),
           permissionOverwrites: [...channel.permissionOverwrites],
+        },
+      };
+    },
+
+    async getGuild(request) {
+      const guild = controls.guilds.get(request.guildId);
+      if (!guild) {
+        return {
+          kind: "found",
+          value: { id: request.guildId, premiumTier: 0, features: [] },
+        };
+      }
+      return {
+        kind: "found",
+        value: {
+          id: guild.id,
+          premiumTier: guild.premiumTier,
+          features: [...guild.features],
         },
       };
     },
@@ -247,6 +296,9 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         requestId: request.requestId,
         ...(request.name === undefined ? {} : { name: request.name }),
         ...(request.userLimit === undefined ? {} : { userLimit: request.userLimit }),
+        ...(request.bitrate === undefined ? {} : { bitrate: request.bitrate }),
+        ...(request.nsfw === undefined ? {} : { nsfw: request.nsfw }),
+        ...(request.rtcRegion === undefined ? {} : { rtcRegion: request.rtcRegion }),
       });
       if (controls.failNextEdit) {
         const result = controls.failNextEdit;
@@ -257,6 +309,26 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
       if (!channel) return { kind: "missing" };
       if (request.name !== undefined) channel.name = request.name;
       if (request.userLimit !== undefined) channel.userLimit = request.userLimit;
+      if (request.bitrate !== undefined) channel.bitrate = request.bitrate;
+      if (request.nsfw !== undefined) channel.nsfw = request.nsfw;
+      if (request.rtcRegion !== undefined) channel.rtcRegion = request.rtcRegion;
+      return { kind: "ok" };
+    },
+
+    async setChannelVoiceStatus(request) {
+      controls.voiceStatusCalls.push({
+        channelId: request.channelId,
+        requestId: request.requestId,
+        status: request.status,
+      });
+      if (controls.failNextVoiceStatus) {
+        const result = controls.failNextVoiceStatus;
+        delete controls.failNextVoiceStatus;
+        return result;
+      }
+      const channel = controls.channels.get(request.channelId);
+      if (!channel) return { kind: "missing" };
+      channel.status = request.status;
       return { kind: "ok" };
     },
 

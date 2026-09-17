@@ -736,8 +736,145 @@ describe("/vc command family", () => {
     const { vc, controls, metrics } = await setup();
     controls.failNextOverwrite = { kind: "transient", message: "rate" };
     await vc.execute(interaction({ id: "lock-fail", guildId, options: [{ name: "lock", type: 1 }] }));
-    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Could not lock/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Unable to lock/i);
     expect(metrics.snapshot().restFailures).toBe(1);
+  });
+
+  test("bitrate respects guild boost level", async () => {
+    const { vc, controls, metrics } = await setup();
+    controls.guilds.set(guildId, { id: guildId, premiumTier: 0, features: [] });
+    controls.channels.get(channelId)!.bitrate = 64_000;
+
+    await vc.execute(
+      interaction({
+        id: "bitrate-high",
+        guildId,
+        options: [
+          {
+            name: "bitrate",
+            type: 1,
+            options: [{ name: "kbps", type: 4, value: 128 }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Maximum bitrate.*96 kbps/i);
+    expect(metrics.snapshot().validationFailures).toBe(1);
+
+    await vc.execute(
+      interaction({
+        id: "bitrate-ok",
+        guildId,
+        options: [
+          {
+            name: "bitrate",
+            type: 1,
+            options: [{ name: "kbps", type: 4, value: 96 }],
+          },
+        ],
+      }),
+    );
+    expect(controls.editCalls.at(-1)?.bitrate).toBe(96_000);
+    expect(controls.channels.get(channelId)?.bitrate).toBe(96_000);
+    expect(metrics.snapshot().successes.bitrate).toBe(1);
+  });
+
+  test("status sets and clears voice channel status", async () => {
+    const { vc, controls, metrics } = await setup();
+
+    await vc.execute(
+      interaction({
+        id: "status-set",
+        guildId,
+        options: [
+          {
+            name: "status",
+            type: 1,
+            options: [{ name: "text", type: 3, value: "  Pure session  " }],
+          },
+        ],
+      }),
+    );
+    expect(controls.voiceStatusCalls.at(-1)).toEqual({
+      channelId,
+      requestId: "vc:status:status-set",
+      status: "Pure session",
+    });
+    expect(controls.channels.get(channelId)?.status).toBe("Pure session");
+    expect(metrics.snapshot().successes.status).toBe(1);
+
+    const { vc: vcClear, controls: clearControls, metrics: clearMetrics } = await setup();
+    clearControls.channels.get(channelId)!.status = "Pure session";
+    await vcClear.execute(
+      interaction({
+        id: "status-clear",
+        guildId,
+        options: [{ name: "status", type: 1 }],
+      }),
+    );
+    expect(clearControls.voiceStatusCalls.at(-1)?.status).toBeNull();
+    expect(clearControls.channels.get(channelId)?.status).toBeNull();
+    expect(clearMetrics.snapshot().successes.status).toBe(1);
+  });
+
+  test("nsfw toggles age restriction", async () => {
+    const { vc, controls, metrics } = await setup();
+    await vc.execute(
+      interaction({
+        id: "nsfw-on",
+        guildId,
+        options: [
+          {
+            name: "nsfw",
+            type: 1,
+            options: [{ name: "enabled", type: 5, value: true }],
+          },
+        ],
+      }),
+    );
+    expect(controls.editCalls.at(-1)?.nsfw).toBe(true);
+    expect(controls.channels.get(channelId)?.nsfw).toBe(true);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/Age restriction enabled/i);
+    expect(metrics.snapshot().successes.nsfw).toBe(1);
+  });
+
+  test("region updates rtc_region including automatic", async () => {
+    const { vc, controls, metrics } = await setup();
+    await vc.execute(
+      interaction({
+        id: "region-us",
+        guildId,
+        options: [
+          {
+            name: "region",
+            type: 1,
+            options: [{ name: "region", type: 3, value: "us-east" }],
+          },
+        ],
+      }),
+    );
+    expect(controls.editCalls.at(-1)?.rtcRegion).toBe("us-east");
+    expect(controls.channels.get(channelId)?.rtcRegion).toBe("us-east");
+    expect(metrics.snapshot().successes.region).toBe(1);
+
+    const { vc: vcAuto, controls: autoControls, metrics: autoMetrics } = await setup();
+    autoControls.channels.get(channelId)!.rtcRegion = "us-east";
+    await vcAuto.execute(
+      interaction({
+        id: "region-auto",
+        guildId,
+        options: [
+          {
+            name: "region",
+            type: 1,
+            options: [{ name: "region", type: 3, value: "automatic" }],
+          },
+        ],
+      }),
+    );
+    expect(autoControls.editCalls.at(-1)?.rtcRegion).toBeNull();
+    expect(autoControls.channels.get(channelId)?.rtcRegion).toBeNull();
+    expect(autoMetrics.snapshot().successes.region).toBe(1);
   });
 
   test("cooldown cleanup stays bounded", () => {

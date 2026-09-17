@@ -67,14 +67,14 @@ function createFailureMessage(
   action: string,
 ): ActionMessage {
   if (result.kind === "forbidden") {
-    return failureResponse("Lack of permission on client or user side.");
+    return failureResponse("Insufficient permissions to complete this action.");
   }
   if (result.kind === "transient") {
     return failureResponse(
-      `Discord failed to ${action}${result.message ? `: ${result.message}` : ""}. Try again.`,
+      `Discord failed to ${action}${result.message ? `: ${result.message}` : ""}. Please try again.`,
     );
   }
-  return failureResponse(`Could not ${action}.`);
+  return failureResponse(`Unable to ${action}.`);
 }
 
 export interface SetupCommandService {
@@ -116,7 +116,7 @@ export function createSetupCommandService(options: {
       }
 
       if (!hasManageGuild(interaction.memberPermissions)) {
-        await reply(failureResponse("Lack of permission on client or user side."));
+        await reply(failureResponse("Insufficient permissions to complete this action."));
         return;
       }
 

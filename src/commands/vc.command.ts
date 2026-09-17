@@ -5,6 +5,11 @@ import {
 
 import type { CommandModule } from "../handlers/types.ts";
 import { failureResponse } from "../lib/j2c/action-response.ts";
+import {
+  VOICE_BITRATE_MIN_KBPS,
+  VOICE_REGION_OPTIONS,
+  VOICE_STATUS_MAX_LENGTH,
+} from "../lib/j2c/voice-channel-settings.ts";
 
 const memberOption = {
   type: ApplicationCommandOptionTypes.User,
@@ -44,6 +49,65 @@ const vcCommandData: CreateApplicationCommand = {
           required: true,
           minValue: 0,
           maxValue: 99,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "bitrate",
+      description: "Set the voice channel bitrate (kbps), limited by server boost level",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.Integer,
+          name: "kbps",
+          description: `Bitrate in kbps (${VOICE_BITRATE_MIN_KBPS}–384, capped by boost level)`,
+          required: true,
+          minValue: VOICE_BITRATE_MIN_KBPS,
+          maxValue: 384,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "status",
+      description: "Set or clear the voice channel status",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "text",
+          description: "Status text (omit to clear)",
+          required: false,
+          maxLength: VOICE_STATUS_MAX_LENGTH,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "nsfw",
+      description: "Enable or disable age restriction on the channel",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.Boolean,
+          name: "enabled",
+          description: "Whether age restriction should be enabled",
+          required: true,
+        },
+      ],
+    },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "region",
+      description: "Set the voice region for the channel",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "region",
+          description: "Voice region (Automatic follows Discord routing)",
+          required: true,
+          choices: VOICE_REGION_OPTIONS.map((entry) => ({
+            name: entry.name,
+            value: entry.value,
+          })),
         },
       ],
     },
@@ -141,7 +205,7 @@ const vcCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse("Voice channel management is not ready yet.").embeds,
+        embeds: failureResponse("Voice channel management is unavailable.").embeds,
         ephemeral: true,
       });
       return;

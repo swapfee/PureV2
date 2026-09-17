@@ -64,7 +64,7 @@ describe("/setup command", () => {
     };
 
     await setup.execute(baseInteraction({ memberPermissions: "0" }));
-    expect(replies[0]).toMatch(/Lack of permission on client or user side/i);
+    expect(replies[0]).toMatch(/Insufficient permissions to complete this action/i);
     expect(replies[0]).toContain("<:error:1543407530380624037>");
   });
 
@@ -143,7 +143,7 @@ describe("/setup command", () => {
       "<:error:1543407530380624037>",
     );
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /Lack of permission on client or user side/i,
+      /Insufficient permissions to complete this action/i,
     );
   });
 

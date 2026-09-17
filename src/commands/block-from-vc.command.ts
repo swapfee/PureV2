@@ -20,7 +20,7 @@ const blockFromVcCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse("Voice channel management is not ready yet.").embeds,
+        embeds: failureResponse("Voice channel management is unavailable.").embeds,
         ephemeral: true,
       });
       return;
@@ -29,7 +29,7 @@ const blockFromVcCommand: CommandModule = {
       await context.discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
-        embeds: failureResponse("Provide a member to block.").embeds,
+        embeds: failureResponse("Specify a member to block.").embeds,
         ephemeral: true,
       });
       return;

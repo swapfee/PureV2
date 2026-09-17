@@ -45,6 +45,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("editChannel is not available on the coordinator Discord port");
     },
 
+    async setChannelVoiceStatus() {
+      throw new Error("setChannelVoiceStatus is not available on the coordinator Discord port");
+    },
+
     async editChannelPermissionOverwrite() {
       throw new Error("editChannelPermissionOverwrite is not available on the coordinator Discord port");
     },
@@ -55,6 +59,10 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
 
     async getCurrentUser() {
       throw new Error("getCurrentUser is not available on the coordinator Discord port");
+    },
+
+    async getGuild() {
+      throw new Error("getGuild is not available on the coordinator Discord port");
     },
 
     async getGuildMember() {

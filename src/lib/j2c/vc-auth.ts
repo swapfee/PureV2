@@ -125,7 +125,7 @@ export function vcAuthUserMessage(reason: VcAuthFailure): string {
     not_owner: "Only the channel owner can use this command.",
     channel_missing: "Your temporary channel no longer exists.",
     not_in_managed_channel: "You must be connected to a managed voice channel.",
-    voice_lookup_failed: "Could not verify your voice state. Try again shortly.",
+    voice_lookup_failed: "Unable to verify your voice state. Please try again.",
   };
   return messages[reason];
 }

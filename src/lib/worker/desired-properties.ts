@@ -33,11 +33,16 @@ export const workerDesiredProperties = {
     permissionOverwrites: true,
     bitrate: true,
     userLimit: true,
+    nsfw: true,
+    rtcRegion: true,
+    status: true,
   },
   guild: {
     id: true,
     name: true,
     voiceStates: true,
+    premiumTier: true,
+    features: true,
   },
   voiceState: {
     guildId: true,

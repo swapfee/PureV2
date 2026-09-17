@@ -136,7 +136,7 @@ export function createInteractionDispatcher(
           await discord.respondToInteraction({
             interactionId: interaction.id,
             interactionToken: interaction.token,
-            embeds: failureResponse(`Please wait ${Math.ceil(decision.remainingMs / 1000)}s before using this command again.`).embeds,
+            embeds: failureResponse(`This command is on cooldown. Please wait ${Math.ceil(decision.remainingMs / 1000)}s.`).embeds,
             ephemeral: true,
           });
           return;

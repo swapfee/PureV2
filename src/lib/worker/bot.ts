@@ -226,30 +226,51 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
 
     async getChannel(request) {
       try {
-        const channel = await bot.helpers.getChannel(request.channelId);
-        const overwrites = readOverwrites(Reflect.get(channel, "permissionOverwrites"));
-        const typeRaw = Reflect.get(channel, "type");
-        const type =
-          typeof typeRaw === "number"
-            ? typeRaw
-            : typeof typeRaw === "bigint"
-              ? Number(typeRaw)
-              : undefined;
-        const userLimitRaw = Reflect.get(channel, "userLimit");
-        const userLimit =
-          typeof userLimitRaw === "number"
-            ? userLimitRaw
-            : typeof userLimitRaw === "bigint"
-              ? Number(userLimitRaw)
-              : undefined;
+        // Prefer raw REST so voice fields Discordeno may omit (e.g. status) are available.
+        const channel = await bot.rest.makeRequest<{
+          id: string | number | bigint;
+          name?: string;
+          type?: number;
+          user_limit?: number;
+          bitrate?: number;
+          nsfw?: boolean;
+          rtc_region?: string | null;
+          status?: string | null;
+          permission_overwrites?: unknown;
+        }>("GET", bot.rest.routes.channels.channel(request.channelId));
+        const overwrites = readOverwrites(channel.permission_overwrites);
         return {
           kind: "found" as const,
           value: {
             id: String(channel.id),
             ...(channel.name === undefined ? {} : { name: channel.name }),
-            ...(type === undefined ? {} : { type }),
-            ...(userLimit === undefined ? {} : { userLimit }),
+            ...(channel.type === undefined ? {} : { type: channel.type }),
+            ...(channel.user_limit === undefined ? {} : { userLimit: channel.user_limit }),
+            ...(channel.bitrate === undefined ? {} : { bitrate: channel.bitrate }),
+            ...(channel.nsfw === undefined ? {} : { nsfw: channel.nsfw }),
+            ...(channel.rtc_region === undefined ? {} : { rtcRegion: channel.rtc_region }),
+            ...(channel.status === undefined ? {} : { status: channel.status }),
             ...(overwrites === undefined ? {} : { permissionOverwrites: overwrites }),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
+    },
+
+    async getGuild(request) {
+      try {
+        const guild = await bot.rest.makeRequest<{
+          id: string | number | bigint;
+          premium_tier?: number;
+          features?: string[];
+        }>("GET", bot.rest.routes.guilds.guild(request.guildId));
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(guild.id),
+            premiumTier: typeof guild.premium_tier === "number" ? guild.premium_tier : 0,
+            features: Array.isArray(guild.features) ? guild.features : [],
           },
         };
       } catch (error) {
@@ -267,12 +288,27 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
               body: {
                 ...(request.name === undefined ? {} : { name: request.name }),
                 ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+                ...(request.bitrate === undefined ? {} : { bitrate: request.bitrate }),
+                ...(request.nsfw === undefined ? {} : { nsfw: request.nsfw }),
+                ...(request.rtcRegion === undefined ? {} : { rtc_region: request.rtcRegion }),
               },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },
             request.reason,
           ),
         );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
+    },
+
+    async setChannelVoiceStatus(request) {
+      try {
+        await bot.rest.makeRequest("PUT", `/channels/${request.channelId}/voice-status`, {
+          body: { status: request.status },
+          headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+        });
         return { kind: "ok" };
       } catch (error) {
         return toDiscordOperationResult(error);

@@ -93,7 +93,18 @@ export interface DiscordChannelDetails {
   readonly name?: string;
   readonly type?: number;
   readonly userLimit?: number;
+  readonly bitrate?: number;
+  readonly nsfw?: boolean;
+  readonly rtcRegion?: string | null;
+  /** Voice channel status text (not topic/name). */
+  readonly status?: string | null;
   readonly permissionOverwrites?: readonly PermissionOverwrite[];
+}
+
+export interface DiscordGuildDetails {
+  readonly id: string;
+  readonly premiumTier: number;
+  readonly features: readonly string[];
 }
 
 export type DiscordOperationResult =
@@ -154,12 +165,24 @@ export interface DiscordApiPort {
   getChannel(request: {
     readonly channelId: string;
   }): Promise<DiscordValueResult<DiscordChannelDetails>>;
+  getGuild(request: {
+    readonly guildId: string;
+  }): Promise<DiscordValueResult<DiscordGuildDetails>>;
   editChannel(request: {
     readonly channelId: string;
     readonly requestId: string;
     readonly name?: string;
     readonly userLimit?: number;
+    readonly bitrate?: number;
+    readonly nsfw?: boolean;
+    readonly rtcRegion?: string | null;
     readonly reason?: string;
+  }): Promise<DiscordOperationResult>;
+  /** Sets or clears the voice channel status (separate from topic/name). */
+  setChannelVoiceStatus(request: {
+    readonly channelId: string;
+    readonly requestId: string;
+    readonly status: string | null;
   }): Promise<DiscordOperationResult>;
   editChannelPermissionOverwrite(request: {
     readonly channelId: string;
