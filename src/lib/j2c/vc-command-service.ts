@@ -1,6 +1,7 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
+import { cooldownFailureMessage } from "../discord-timestamp.ts";
 import { failureResponse, successResponse, type ActionMessage } from "./action-response.ts";
 import {
   authorizeVcConnectedMember,
@@ -250,7 +251,7 @@ export function createVcCommandService(options: {
           await reply(
             interaction,
             deferred,
-            failureResponse(`This command is on cooldown. Please wait ${Math.ceil(remainingMs / 1000)}s.`),
+            failureResponse(cooldownFailureMessage(remainingMs)),
           );
           return;
         }
@@ -398,9 +399,7 @@ export function createVcCommandService(options: {
           await reply(
             interaction,
             deferred,
-            failureResponse(
-              `This command is on cooldown. Please wait ${Math.ceil(remainingMs / 1000)}s.`,
-            ),
+            failureResponse(cooldownFailureMessage(remainingMs)),
           );
           return;
         }
@@ -647,7 +646,7 @@ export function createVcCommandService(options: {
         await reply(
           interaction,
           deferred,
-          failureResponse(`This command is on cooldown. Please wait ${Math.ceil(remainingMs / 1000)}s.`),
+          failureResponse(cooldownFailureMessage(remainingMs)),
         );
         return;
       }
