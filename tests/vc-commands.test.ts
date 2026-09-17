@@ -7,7 +7,17 @@ import {
   createMemoryTemporaryChannelRepository,
 } from "../src/lib/j2c/memory-repositories.ts";
 import { createVcCommandService, VC_COOLDOWNS_MS } from "../src/lib/j2c/vc-command-service.ts";
+import {
+  buildJoinRequestCustomId,
+  buildJoinRequestKey,
+  finalizeJoinRequestMessage,
+  hasPendingJoinRequest,
+  registerPendingJoinRequest,
+  resetJoinRequestStoreForTests,
+  VC_JOIN_REQUEST_TTL_MS,
+} from "../src/lib/j2c/vc-join-request.ts";
 import { createVcMetrics } from "../src/lib/j2c/vc-metrics.ts";
+import { createVoicePanelInteractionHandler } from "../src/lib/j2c/voice-panel-interactions.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 
@@ -895,4 +905,259 @@ describe("/vc command family", () => {
     expect(lines.some((line) => line.includes("vc:lock:lock-log"))).toBe(true);
   });
 
+  test("/vc request posts a join request; owner approve permits and decline finalizes", async () => {
+    resetJoinRequestStoreForTests();
+    const { vc, controls, metrics, channels } = await setup();
+    controls.channels.set(channelId, {
+      id: channelId,
+      name: "owner-room",
+      guildId,
+      userLimit: 0,
+      permissionOverwrites: [
+        {
+          id: guildId,
+          type: 0,
+          allow: "0",
+          deny: BitwisePermissionFlags.CONNECT.toString(),
+        },
+      ],
+    });
+    await channels.setLocked(channelId, true);
+
+    const panelLogger = createLogger({
+      service: "purev2",
+      role: "test",
+      level: "error",
+      write: () => undefined,
+    });
+
+    await vc.execute(
+      interaction({
+        id: "request-create",
+        guildId,
+        userId: targetId,
+        options: [
+          {
+            name: "request",
+            type: 1,
+            options: [{ name: "target", type: 3, value: channelId }],
+          },
+        ],
+      }),
+    );
+
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/join request sent/i);
+    expect(metrics.snapshot().successes.request).toBe(1);
+    expect(controls.channelMessages).toHaveLength(1);
+    expect(controls.channelMessages[0]?.content).toMatch(/join request/i);
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(true);
+
+    const messageId = controls.channelMessages[0]!.id;
+    const expiresAt = Date.now() + VC_JOIN_REQUEST_TTL_MS;
+
+    const { discord: denyDiscord, controls: denyControls } = createFakeDiscord({
+      channels: controls.channels,
+      voiceByUser: controls.voiceByUser,
+      users: controls.users,
+    });
+    const denyHandler = createVoicePanelInteractionHandler({
+      channels,
+      discord: denyDiscord,
+      logger: panelLogger,
+      botUsername: "Pure",
+    });
+    await denyHandler.execute({
+      id: "req-deny-nonowner",
+      token: "token-nonowner",
+      type: 3,
+      applicationId: "555555555555555555",
+      guildId,
+      channelId,
+      userId: targetId,
+      messageId,
+      customId: buildJoinRequestCustomId("approve", channelId, targetId, expiresAt),
+    });
+    expect(embedText(denyControls.responses.at(-1))).toMatch(/only the channel owner/i);
+    expect(denyControls.deferredUpdates).toHaveLength(0);
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(true);
+
+    const { discord: approveDiscord, controls: approveControls } = createFakeDiscord({
+      channels: controls.channels,
+      voiceByUser: controls.voiceByUser,
+      users: controls.users,
+    });
+    const approveHandler = createVoicePanelInteractionHandler({
+      channels,
+      discord: approveDiscord,
+      logger: panelLogger,
+      botUsername: "Pure",
+    });
+    await approveHandler.execute({
+      id: "req-approve",
+      token: "token-approve",
+      type: 3,
+      applicationId: "555555555555555555",
+      guildId,
+      channelId,
+      userId: ownerId,
+      messageId,
+      customId: buildJoinRequestCustomId("approve", channelId, targetId, expiresAt),
+    });
+    expect(approveControls.deferredUpdates).toContain("req-approve");
+    expect(approveControls.editedChannelMessages.at(-1)?.content).toMatch(/approved/i);
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(false);
+    const permitted = approveControls.channels
+      .get(channelId)
+      ?.permissionOverwrites.find((overwrite) => overwrite.id === targetId);
+    expect(permitted).toBeTruthy();
+    expect((BigInt(permitted!.allow) & BitwisePermissionFlags.CONNECT) !== 0n).toBe(true);
+
+    resetJoinRequestStoreForTests();
+    controls.channelMessages.length = 0;
+    controls.editedInteractions.length = 0;
+    const lockedChannel = controls.channels.get(channelId)!;
+    controls.channels.set(channelId, {
+      ...lockedChannel,
+      permissionOverwrites: [
+        {
+          id: guildId,
+          type: 0,
+          allow: "0",
+          deny: BitwisePermissionFlags.CONNECT.toString(),
+        },
+      ],
+    });
+
+    await vc.execute(
+      interaction({
+        id: "request-create-2",
+        guildId,
+        userId: targetId,
+        options: [
+          {
+            name: "request",
+            type: 1,
+            options: [{ name: "target", type: 3, value: ownerId }],
+          },
+        ],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/join request sent/i);
+    const declineMessageId = controls.channelMessages[0]!.id;
+
+    const { discord: declineDiscord, controls: declineControls } = createFakeDiscord({
+      channels: controls.channels,
+      voiceByUser: controls.voiceByUser,
+      users: controls.users,
+    });
+    const declineHandler = createVoicePanelInteractionHandler({
+      channels,
+      discord: declineDiscord,
+      logger: panelLogger,
+      botUsername: "Pure",
+    });
+    await declineHandler.execute({
+      id: "req-decline",
+      token: "token-decline",
+      type: 3,
+      applicationId: "555555555555555555",
+      guildId,
+      channelId,
+      userId: ownerId,
+      messageId: declineMessageId,
+      customId: buildJoinRequestCustomId(
+        "decline",
+        channelId,
+        targetId,
+        Date.now() + VC_JOIN_REQUEST_TTL_MS,
+      ),
+    });
+    expect(declineControls.editedChannelMessages.at(-1)?.content).toMatch(/declined/i);
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(false);
+  });
+
+  test("/vc request expiry disables buttons", async () => {
+    resetJoinRequestStoreForTests();
+    const { channels } = await setup();
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "owner-room",
+            guildId,
+            userLimit: 0,
+            permissionOverwrites: [
+              {
+                id: guildId,
+                type: 0,
+                allow: "0",
+                deny: BitwisePermissionFlags.CONNECT.toString(),
+              },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    const messageId = "800000000000000001";
+    const shortExpiresAt = Date.now() + 40;
+    registerPendingJoinRequest(
+      {
+        requestKey: buildJoinRequestKey("request-expire-timer"),
+        guildId,
+        channelId,
+        ownerId,
+        requesterId: targetId,
+        messageId,
+        expiresAt: shortExpiresAt,
+      },
+      async (pending) => {
+        await finalizeJoinRequestMessage({
+          discord,
+          channelId: pending.channelId,
+          messageId: pending.messageId,
+          requesterId: pending.requesterId,
+          ownerId: pending.ownerId,
+          expiresAt: pending.expiresAt,
+          outcome: "expired",
+          requestId: `${pending.requestKey}:expire`,
+        });
+      },
+    );
+
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(hasPendingJoinRequest(channelId, targetId)).toBe(false);
+    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/expired/i);
+    const components = controls.editedChannelMessages.at(-1)?.components as
+      | { components?: { disabled?: boolean }[] }[]
+      | undefined;
+    expect(components?.[0]?.components?.every((button) => button.disabled === true)).toBe(true);
+
+    const lateHandler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: createLogger({
+        service: "purev2",
+        role: "test",
+        level: "error",
+        write: () => undefined,
+      }),
+      botUsername: "Pure",
+    });
+    await lateHandler.execute({
+      id: "req-late",
+      token: "token-late",
+      type: 3,
+      applicationId: "555555555555555555",
+      guildId,
+      channelId,
+      userId: ownerId,
+      messageId,
+      customId: buildJoinRequestCustomId("approve", channelId, targetId, Date.now() - 1_000),
+    });
+    expect(controls.editedChannelMessages.at(-1)?.content).toMatch(/expired/i);
+  });
 });
