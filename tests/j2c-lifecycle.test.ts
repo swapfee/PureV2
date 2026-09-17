@@ -186,6 +186,62 @@ describe("creation lifecycle", () => {
     expect(controls.createCalls[0]?.position).toBe(2);
   });
 
+  test("sequence naming retries when two joins race for the same number", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "VC",
+      namingMode: "sequence",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId: "711111111111111111",
+      ownerId: "811111111111111111",
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "r-a",
+      creationRequestId: "c-a",
+      sequenceNumber: 1,
+    });
+
+    let allocateCalls = 0;
+    const originalAllocate = channels.allocateSequenceNumber.bind(channels);
+    channels.allocateSequenceNumber = async (id) => {
+      allocateCalls += 1;
+      // First attempt returns a stale colliding number; later attempts use real gap-fill.
+      if (allocateCalls === 1) return 1;
+      return originalAllocate(id);
+    };
+
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-seq-race",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(allocateCalls).toBeGreaterThanOrEqual(2);
+    expect(controls.createCalls.map((call) => call.name)).toEqual(["VC 1", "VC 2"]);
+    expect(controls.createCalls.at(-1)?.name).toBe("VC 2");
+    expect(controls.deleteCalls.length).toBeGreaterThanOrEqual(1);
+    if (outcome.kind === "created") {
+      const record = await channels.findByChannelId(outcome.channelId);
+      expect(record?.sequenceNumber).toBe(2);
+    }
+  });
+
   test("cancels when the user leaves the lobby before channel creation", async () => {
     const configs = createMemoryGuildConfigRepository();
     await seedConfig(configs);

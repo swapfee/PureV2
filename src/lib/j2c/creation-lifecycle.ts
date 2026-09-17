@@ -25,6 +25,30 @@ import { systemClock } from "./time.ts";
 import { synchronizeTemporaryChannelAccess } from "./voice-controls.ts";
 import { installVoiceControlPanel } from "./voice-panel-service.ts";
 
+const MAX_SEQUENCE_CREATE_ATTEMPTS = 5;
+
+function isSequenceNumberConflict(error: unknown): boolean {
+  if (error instanceof Error && /Sequence \d+ already used/i.test(error.message)) {
+    return true;
+  }
+  if (typeof error === "object" && error !== null) {
+    const code = Reflect.get(error, "code");
+    if (code === 11000) {
+      const message = String(Reflect.get(error, "message") ?? "");
+      const keyPattern = Reflect.get(error, "keyPattern");
+      if (/sequenceNumber|guild_sequence/i.test(message)) return true;
+      if (
+        typeof keyPattern === "object" &&
+        keyPattern !== null &&
+        Reflect.has(keyPattern, "sequenceNumber")
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export type CreationOutcome =
   | { readonly kind: "ignored"; readonly reason: string }
   | { readonly kind: "duplicate_prevented"; readonly channelId?: string }
@@ -194,43 +218,114 @@ export function createCreationLifecycle(options: {
         memberId: input.memberId,
         ...(input.username === undefined ? {} : { username: input.username }),
       });
-      let channelName: string;
+
+      let channelId: string | undefined;
       let sequenceNumber: number | undefined;
-      if (config.namingMode === "sequence") {
-        sequenceNumber = await options.channels.allocateSequenceNumber(input.guildId);
-        channelName = renderSequentialChannelName(config.channelNameTemplate, sequenceNumber);
-      } else {
-        channelName = renderChannelName(config.channelNameTemplate, channelUsername);
-      }
-      const created = await options.discord.createVoiceChannel({
-        guildId: input.guildId,
-        name: channelName,
-        parentId: config.categoryId,
-        ...(config.defaultUserLimit === undefined ? {} : { userLimit: config.defaultUserLimit }),
-        // Keep sequential rooms ordered under the category (lobby typically stays above).
-        ...(sequenceNumber === undefined ? {} : { position: sequenceNumber }),
-        requestId: createReqId,
-        reason: "join-to-create",
-      });
+      const maxAttempts =
+        config.namingMode === "sequence" ? MAX_SEQUENCE_CREATE_ATTEMPTS : 1;
 
-      if (created.kind !== "found") {
-        await options.reservationService.fail(reservationId, `create_failed:${created.kind}`);
-        options.metrics.increment("creationFailures");
-        if (created.kind === "forbidden") {
-          // permanent — do not retry
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const attemptRequestId =
+          attempt === 0 ? createReqId : `${createReqId}:seq-retry:${attempt}`;
+
+        let channelName: string;
+        if (config.namingMode === "sequence") {
+          sequenceNumber = await options.channels.allocateSequenceNumber(input.guildId);
+          channelName = renderSequentialChannelName(config.channelNameTemplate, sequenceNumber);
+        } else {
+          sequenceNumber = undefined;
+          channelName = renderChannelName(config.channelNameTemplate, channelUsername);
         }
-        options.logger.error("Temporary channel creation failed", {
+
+        const created = await options.discord.createVoiceChannel({
           guildId: input.guildId,
-          userId: input.memberId,
-          reservationId,
-          eventId: input.eventId,
-          requestId: createReqId,
-          result: created.kind,
+          name: channelName,
+          parentId: config.categoryId,
+          ...(config.defaultUserLimit === undefined ? {} : { userLimit: config.defaultUserLimit }),
+          // Keep sequential rooms ordered under the category (lobby typically stays above).
+          ...(sequenceNumber === undefined ? {} : { position: sequenceNumber }),
+          requestId: attemptRequestId,
+          reason: "join-to-create",
         });
-        return { kind: "failed", reason: `create_failed:${created.kind}` };
+
+        if (created.kind !== "found") {
+          await options.reservationService.fail(reservationId, `create_failed:${created.kind}`);
+          options.metrics.increment("creationFailures");
+          options.logger.error("Temporary channel creation failed", {
+            guildId: input.guildId,
+            userId: input.memberId,
+            reservationId,
+            eventId: input.eventId,
+            requestId: attemptRequestId,
+            result: created.kind,
+            attempt,
+          });
+          return { kind: "failed", reason: `create_failed:${created.kind}` };
+        }
+
+        channelId = created.value.id;
+        try {
+          await options.channels.create({
+            guildId: input.guildId,
+            channelId,
+            ownerId: input.memberId,
+            lobbyChannelId: config.lobbyChannelId,
+            status: "creating",
+            reservationId,
+            creationRequestId: createReqId,
+            occupantIds: [],
+            appliedBlockUserIds: [],
+            ...(sequenceNumber === undefined ? {} : { sequenceNumber }),
+          });
+          break;
+        } catch (error: unknown) {
+          const canRetrySequence =
+            config.namingMode === "sequence" &&
+            isSequenceNumberConflict(error) &&
+            attempt < maxAttempts - 1;
+
+          if (canRetrySequence) {
+            options.logger.warn("Sequence number conflict; retrying allocation", {
+              guildId: input.guildId,
+              userId: input.memberId,
+              reservationId,
+              eventId: input.eventId,
+              sequenceNumber,
+              attempt,
+            });
+            await options.discord.deleteChannel({
+              channelId,
+              requestId: `${attemptRequestId}:conflict-cleanup`,
+              reason: "j2c sequence conflict retry",
+            });
+            await options.channels.remove(channelId);
+            channelId = undefined;
+            continue;
+          }
+
+          const compensation = await compensate({
+            channelId,
+            reservationId,
+            guildId: input.guildId,
+            memberId: input.memberId,
+            eventId: input.eventId,
+            reason: "persist_failed",
+          });
+          options.metrics.increment("creationFailures");
+          return {
+            kind: "failed",
+            reason: "persist_failed",
+            ...(compensation === "orphan" ? { orphanChannelId: channelId } : {}),
+          };
+        }
       }
 
-      const channelId = created.value.id;
+      if (!channelId) {
+        await options.reservationService.fail(reservationId, "sequence_conflict_exhausted");
+        options.metrics.increment("creationFailures");
+        return { kind: "failed", reason: "sequence_conflict_exhausted" };
+      }
+
       if (config.permissionSource === "lobby") {
         await copyChannelPermissionOverwrites({
           discord: options.discord,
@@ -250,39 +345,11 @@ export function createCreationLifecycle(options: {
       const blockedUserIds = options.blocks
         ? await options.blocks.getBlockedUserIds(input.guildId, input.memberId)
         : [];
-      try {
-        await options.channels.create({
-          guildId: input.guildId,
-          channelId,
-          ownerId: input.memberId,
-          lobbyChannelId: config.lobbyChannelId,
-          status: "creating",
-          reservationId,
-          creationRequestId: createReqId,
-          occupantIds: [],
-          appliedBlockUserIds: blockedUserIds,
-          ...(sequenceNumber === undefined ? {} : { sequenceNumber }),
-        });
-      } catch {
-        const compensation = await compensate({
-          channelId,
-          reservationId,
-          guildId: input.guildId,
-          memberId: input.memberId,
-          eventId: input.eventId,
-          reason: "persist_failed",
-        });
-        options.metrics.increment("creationFailures");
-        return {
-          kind: "failed",
-          reason: "persist_failed",
-          ...(compensation === "orphan" ? { orphanChannelId: channelId } : {}),
-        };
-      }
 
       // Install the panel while status is still "creating" so voice-state repair
       // (active-only) cannot race and send a second copy after markActive.
       if (blockedUserIds.length > 0) {
+        await options.channels.setAppliedBlockUserIds(channelId, blockedUserIds);
         const record = await options.channels.findByChannelId(channelId);
         if (record) {
           const sync = await synchronizeTemporaryChannelAccess({
