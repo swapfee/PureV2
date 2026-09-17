@@ -389,7 +389,8 @@ describe("/vc command family", () => {
         ],
       }),
     );
-    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/wait/i);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/<t:\d+:R>/);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/on cooldown/i);
     expect(metrics.snapshot().cooldownRejections).toBe(1);
     expect(VC_COOLDOWNS_MS.rename).toBeGreaterThan(0);
     expect(cooldowns.size()).toBeGreaterThan(0);

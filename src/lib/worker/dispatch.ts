@@ -1,6 +1,7 @@
 import type { CommandRegistry, EventContext, EventRegistry, InteractionDispatcher } from "../../handlers/types.ts";
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import { failureResponse } from "../j2c/action-response.ts";
+import { cooldownFailureMessage } from "../discord-timestamp.ts";
 import type { Logger } from "../logger.ts";
 import type {
   DiscordApiPort,
@@ -160,7 +161,7 @@ export function createInteractionDispatcher(
           await discord.respondToInteraction({
             interactionId: interaction.id,
             interactionToken: interaction.token,
-            embeds: failureResponse(`This command is on cooldown. Please wait ${Math.ceil(decision.remainingMs / 1000)}s.`).embeds,
+            embeds: failureResponse(cooldownFailureMessage(decision.remainingMs)).embeds,
             ephemeral: true,
           });
           return;
