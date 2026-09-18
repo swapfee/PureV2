@@ -222,7 +222,7 @@ export function createCreationLifecycle(options: {
       });
 
       let channelPosition: number | undefined;
-      if (config.channelHoist === "top") {
+      if (config.channelHoist === "bottom") {
         const lobby = await options.discord.getChannel({ channelId: config.lobbyChannelId });
         if (
           lobby.kind === "found" &&
@@ -233,7 +233,7 @@ export function createCreationLifecycle(options: {
           channelPosition = lobby.value.position + 1;
         } else {
           // Appending is the safe fallback: the room remains below the lobby.
-          options.logger.warn("Unable to resolve lobby position for top channel hoist", {
+          options.logger.warn("Unable to resolve lobby position for bottom channel hoist", {
             guildId: input.guildId,
             channelId: config.lobbyChannelId,
             outcome: lobby.kind,

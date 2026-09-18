@@ -84,7 +84,7 @@ const guildConfigSchema = new Schema(
       min: 1,
       default: 1,
     },
-    /** Placement of newly created temporary voice channels below the lobby. */
+    /** Creation order below the lobby: top is oldest-first; bottom is newest-first. */
     channelHoist: {
       type: String,
       required: true,

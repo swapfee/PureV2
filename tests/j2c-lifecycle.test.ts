@@ -135,7 +135,48 @@ describe("creation lifecycle", () => {
     expect(stored[0]?.sequenceNumber).toBe(1);
   });
 
-  test("top hoist creates the newest room immediately below the lobby", async () => {
+  test("bottom hoist creates the newest room immediately below the lobby", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "{username}'s channel",
+      channelHoist: "bottom",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.channels.set(lobbyId, {
+      id: lobbyId,
+      name: "Join to Create",
+      position: 7,
+      guildId,
+      permissionOverwrites: [],
+    });
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-bottom-hoist",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    const [stored] = await channels.listByGuild(guildId);
+    expect(controls.positionCalls).toHaveLength(1);
+    expect(controls.positionCalls[0]?.guildId).toBe(guildId);
+    expect(controls.positionCalls[0]?.channelId).toBe(stored?.channelId);
+    expect(controls.positionCalls[0]?.position).toBe(8);
+    expect(controls.positionCalls[0]?.requestId).toBe("j2c-position:event-bottom-hoist");
+  });
+
+  test("top hoist appends new rooms in oldest-first creation order", async () => {
     const configs = createMemoryGuildConfigRepository();
     await configs.upsert({
       guildId,
@@ -168,12 +209,7 @@ describe("creation lifecycle", () => {
     });
 
     expect(outcome.kind).toBe("created");
-    const [stored] = await channels.listByGuild(guildId);
-    expect(controls.positionCalls).toHaveLength(1);
-    expect(controls.positionCalls[0]?.guildId).toBe(guildId);
-    expect(controls.positionCalls[0]?.channelId).toBe(stored?.channelId);
-    expect(controls.positionCalls[0]?.position).toBe(8);
-    expect(controls.positionCalls[0]?.requestId).toBe("j2c-position:event-top-hoist");
+    expect(controls.positionCalls).toHaveLength(0);
   });
 
   test("sequence naming gap-fills after a temporary channel is deleted", async () => {

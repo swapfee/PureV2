@@ -69,11 +69,11 @@ const setupCommandData: CreateApplicationCommand = {
         {
           type: ApplicationCommandOptionTypes.String,
           name: "hoist",
-          description: "Place new temporary channels at the top or bottom below the lobby",
+          description: "Order temporary channels oldest-first or newest-first below the lobby",
           required: false,
           choices: [
-            { name: "Top", value: "top" },
-            { name: "Bottom", value: "bottom" },
+            { name: "Top (oldest first)", value: "top" },
+            { name: "Bottom (newest first)", value: "bottom" },
           ],
         },
       ],
