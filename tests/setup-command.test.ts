@@ -109,9 +109,7 @@ describe("/setup command", () => {
     expect(controls.overwriteCalls.some((call) => call.overwriteId === "123456789012345678")).toBe(
       true,
     );
-    expect(controls.channelMessages.some((msg) => msg.channelId === saved?.errorLogChannelId)).toBe(
-      true,
-    );
+    expect(controls.channelMessages).toHaveLength(0);
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
   });
 

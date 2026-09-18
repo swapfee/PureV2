@@ -299,25 +299,6 @@ export function createSetupCommandService(options: {
       });
     }
 
-    await discord.sendChannelMessage({
-      channelId: errorLogChannelId,
-      requestId: `setup:${interaction.id}:error-log-intro`,
-      embeds: [
-        {
-          title: "Error log ready",
-          color: 0x57_f2_87,
-          description: [
-            "This channel records Join to Create, voice management, block list, and permission problems for this server.",
-            "",
-            "Each entry includes what happened and a possible solution.",
-            "If problems continue after those steps, contact the bot developer with your server ID and the time of the error.",
-            "",
-            "Keep this channel private to staff. The bot needs View Channel and Send Messages here.",
-          ].join("\n"),
-        },
-      ],
-    });
-
     const compensateCreatedChannels = async (): Promise<void> => {
       await discord.deleteChannel({
         channelId: errorLogChannelId,
