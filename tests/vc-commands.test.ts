@@ -4,6 +4,8 @@ import { BitwisePermissionFlags } from "discordeno";
 import { createCooldownStore } from "../src/handlers/cooldowns.ts";
 import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
 import {
+  createMemoryGuildConfigRepository,
+  createMemoryOwnerBlockListRepository,
   createMemoryTemporaryChannelRepository,
 } from "../src/lib/j2c/memory-repositories.ts";
 import { createVcCommandService, VC_COOLDOWNS_MS } from "../src/lib/j2c/vc-command-service.ts";
@@ -104,6 +106,48 @@ async function setup() {
 }
 
 describe("/vc command family", () => {
+  test("requires Join to Create configuration except for personal block-list commands", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const configs = createMemoryGuildConfigRepository();
+    const blocks = createMemoryOwnerBlockListRepository();
+    const { discord, controls } = createFakeDiscord();
+    const vc = createVcCommandService({
+      channels,
+      configs,
+      blocks,
+      discord,
+      logger: createLogger({
+        service: "purev2",
+        role: "test",
+        level: "error",
+        write: () => undefined,
+      }),
+      metrics: createVcMetrics(),
+      cooldowns: createCooldownStore(),
+    });
+
+    await vc.execute(
+      interaction({
+        id: "unconfigured-lock",
+        guildId,
+        options: [{ name: "lock", type: 1 }],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(
+      /Join to Create System is not configured/i,
+    );
+
+    await vc.execute(
+      interaction({
+        id: "unconfigured-block-list",
+        guildId,
+        options: [{ name: "block-list", type: 1 }],
+      }),
+    );
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/block list is empty/i);
+    expect(embedText(controls.editedInteractions.at(-1))).not.toMatch(/not configured/i);
+  });
+
   test("rejects DMs", async () => {
     const { vc, controls, metrics } = await setup();
     await vc.execute(

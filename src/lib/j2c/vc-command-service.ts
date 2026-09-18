@@ -399,16 +399,30 @@ export function createVcCommandService(options: {
         return;
       }
 
-      if (REQUEST_SUBCOMMANDS.has(subcommand)) {
-        if (!interaction.guildId) {
+      if (!interaction.guildId) {
+        options.metrics.authorizationFailure();
+        await reply(
+          interaction,
+          deferred,
+          failureResponse("This command can only be used in a server."),
+        );
+        return;
+      }
+
+      if (options.configs) {
+        const config = await options.configs.findByGuildId(interaction.guildId);
+        if (!config || !config.enabled) {
           options.metrics.authorizationFailure();
           await reply(
             interaction,
             deferred,
-            failureResponse("This command can only be used in a server."),
+            failureResponse("Join to Create System is not configured in this server."),
           );
           return;
         }
+      }
+
+      if (REQUEST_SUBCOMMANDS.has(subcommand)) {
         const guildId = interaction.guildId;
         const cooldownKey = `vc:${subcommand}:${guildId}:${interaction.userId}`;
         const remainingMs = options.cooldowns.remaining(cooldownKey);
