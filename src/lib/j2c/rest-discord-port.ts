@@ -5,6 +5,7 @@ import type {
   CreateGuildChannelRequest,
   CreateVoiceChannelRequest,
   DiscordApiPort,
+  PermissionOverwrite,
 } from "../runtime-types.ts";
 import { toDiscordOperationResult, toDiscordValueResult } from "./discord-results.ts";
 
@@ -13,6 +14,26 @@ function withReason<T extends Record<string, unknown>>(
   reason: string | undefined,
 ): T & { reason?: string } {
   return reason === undefined ? base : { ...base, reason };
+}
+
+function readPermissionOverwrites(raw: unknown): readonly PermissionOverwrite[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const overwrites: PermissionOverwrite[] = [];
+  for (const value of raw) {
+    if (typeof value !== "object" || value === null) continue;
+    const id = Reflect.get(value, "id");
+    const type = Reflect.get(value, "type");
+    if ((typeof id !== "string" && typeof id !== "number") || (type !== 0 && type !== 1)) {
+      continue;
+    }
+    overwrites.push({
+      id: String(id),
+      type,
+      allow: String(Reflect.get(value, "allow") ?? "0"),
+      deny: String(Reflect.get(value, "deny") ?? "0"),
+    });
+  }
+  return overwrites;
 }
 
 /**
@@ -53,24 +74,95 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("setChannelVoiceStatus is not available on the coordinator Discord port");
     },
 
-    async editChannelPermissionOverwrite() {
-      throw new Error("editChannelPermissionOverwrite is not available on the coordinator Discord port");
+    async editChannelPermissionOverwrite(request) {
+      try {
+        await rest.makeRequest(
+          "PUT",
+          rest.routes.channels.overwrite(request.channelId, request.overwriteId),
+          withReason(
+            {
+              body: {
+                type: request.type,
+                allow: request.allow,
+                deny: request.deny,
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
     },
 
-    async getUser() {
-      throw new Error("getUser is not available on the coordinator Discord port");
+    async getUser(request) {
+      try {
+        const user = await rest.makeRequest<{
+          id: string | number | bigint;
+          username?: string;
+          global_name?: string | null;
+          bot?: boolean;
+        }>("GET", rest.routes.user(request.userId));
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(user.id),
+            bot: user.bot === true,
+            ...(typeof user.username === "string" ? { username: user.username } : {}),
+            ...(typeof user.global_name === "string" ? { globalName: user.global_name } : {}),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
     },
 
     async getCurrentUser() {
-      throw new Error("getCurrentUser is not available on the coordinator Discord port");
+      try {
+        const user = await rest.makeRequest<{
+          id: string | number | bigint;
+          username: string;
+        }>("GET", rest.routes.user("@me"));
+        return {
+          kind: "found" as const,
+          value: { id: String(user.id), username: user.username },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
     },
 
     async getGuild() {
       throw new Error("getGuild is not available on the coordinator Discord port");
     },
 
-    async getGuildMember() {
-      throw new Error("getGuildMember is not available on the coordinator Discord port");
+    async getGuildMember(request) {
+      try {
+        const member = await rest.makeRequest<{
+          nick?: string | null;
+          user?: {
+            id: string | number | bigint;
+            username?: string;
+            global_name?: string | null;
+            bot?: boolean;
+          };
+        }>("GET", rest.routes.guilds.members.member(request.guildId, request.userId));
+        const user = member.user;
+        return {
+          kind: "found" as const,
+          value: {
+            id: String(user?.id ?? request.userId),
+            bot: user?.bot === true,
+            ...(typeof member.nick === "string" ? { nick: member.nick } : {}),
+            ...(typeof user?.username === "string" ? { username: user.username } : {}),
+            ...(typeof user?.global_name === "string" ? { globalName: user.global_name } : {}),
+          },
+        };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
     },
 
     async createVoiceChannel(request: CreateVoiceChannelRequest) {
@@ -127,7 +219,9 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
           name?: string;
           type?: number;
           position?: number;
+          permission_overwrites?: unknown;
         }>("GET", rest.routes.channels.channel(request.channelId));
+        const permissionOverwrites = readPermissionOverwrites(channel.permission_overwrites);
         return {
           kind: "found" as const,
           value: {
@@ -135,6 +229,7 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
             ...(channel.name === undefined ? {} : { name: channel.name }),
             ...(channel.type === undefined ? {} : { type: channel.type }),
             ...(channel.position === undefined ? {} : { position: channel.position }),
+            ...(permissionOverwrites === undefined ? {} : { permissionOverwrites }),
           },
         };
       } catch (error) {
@@ -193,8 +288,25 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("sendDirectMessage is not available on the coordinator Discord port");
     },
 
-    async sendChannelMessage() {
-      throw new Error("sendChannelMessage is not available on the coordinator Discord port");
+    async sendChannelMessage(request) {
+      try {
+        const created = await rest.makeRequest<{ id: string | number | bigint }>(
+          "POST",
+          rest.routes.channels.messages(request.channelId),
+          {
+            body: {
+              ...(request.content === undefined ? {} : { content: request.content }),
+              ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
+              ...(request.components === undefined ? {} : { components: request.components }),
+              ...(request.flags === undefined ? {} : { flags: request.flags }),
+            },
+            headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+          },
+        );
+        return { kind: "found" as const, value: { id: String(created.id) } };
+      } catch (error) {
+        return toDiscordValueResult(error);
+      }
     },
 
     async editChannelMessage() {
