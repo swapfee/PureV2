@@ -61,6 +61,7 @@ export async function runFactoryReset(options: {
   const tracked = await options.channels.listByGuild(options.guildId);
   let deletedTemporaryChannels = 0;
   let keptTemporaryChannels = 0;
+  const retainedChannelIds: string[] = [];
 
   for (const record of tracked) {
     const occupied = isTemporaryChannelOccupied({
@@ -70,6 +71,7 @@ export async function runFactoryReset(options: {
 
     if (occupied) {
       keptTemporaryChannels += 1;
+      retainedChannelIds.push(record.channelId);
       continue;
     }
 
@@ -95,6 +97,7 @@ export async function runFactoryReset(options: {
       });
       // Treat as kept so we do not delete the category while Discord still has it.
       keptTemporaryChannels += 1;
+      retainedChannelIds.push(record.channelId);
     }
   }
 
@@ -157,6 +160,9 @@ export async function runFactoryReset(options: {
       reason,
     });
     renamedCategory = rename.kind === "ok";
+    for (const channelId of retainedChannelIds) {
+      await options.channels.setCleanupCategoryId(channelId, config.categoryId);
+    }
   } else {
     const categoryDelete = await options.discord.deleteChannel({
       channelId: config.categoryId,

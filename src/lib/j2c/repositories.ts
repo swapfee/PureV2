@@ -77,6 +77,10 @@ export interface TemporaryChannelRepository {
     panelVersion: number,
     panelOwnerId: string,
   ): Promise<TemporaryChannelRecord | undefined>;
+  setCleanupCategoryId(
+    channelId: string,
+    cleanupCategoryId: string,
+  ): Promise<TemporaryChannelRecord | undefined>;
   remove(channelId: string): Promise<boolean>;
 }
 

@@ -373,7 +373,9 @@ describe("/setup command", () => {
 
     expect(await configs.findByGuildId("123456789012345678")).toBeUndefined();
     expect(await channels.findByChannelId(emptyId)).toBeUndefined();
-    expect(await channels.findByChannelId(occupiedId)).toBeDefined();
+    expect((await channels.findByChannelId(occupiedId))?.cleanupCategoryId).toBe(
+      config!.categoryId,
+    );
     expect(controls.channels.has(config!.lobbyChannelId)).toBe(false);
     expect(controls.channels.has(emptyId)).toBe(false);
     expect(controls.channels.has(occupiedId)).toBe(true);

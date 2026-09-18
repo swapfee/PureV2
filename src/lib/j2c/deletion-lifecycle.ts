@@ -1,5 +1,6 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort } from "../runtime-types.ts";
+import type { TemporaryChannelRecord } from "../../models/temporary-channel.ts";
 import type { J2cMetrics } from "./metrics.ts";
 import type { TemporaryChannelRepository } from "./repositories.ts";
 import { deletionRequestId } from "./request-ids.ts";
@@ -13,6 +14,80 @@ export const EMPTY_CHANNEL_DELAY_MS = 3_000;
 export interface DeletionLifecycle {
   onOccupantsChanged(channelId: string, occupantIds: readonly string[]): Promise<void>;
   cancelPending(channelId: string): void;
+}
+
+const retainedCategoryCleanupLocks = new Map<string, Promise<void>>();
+
+async function withRetainedCategoryCleanupLock<T>(
+  categoryId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = retainedCategoryCleanupLocks.get(categoryId) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+  retainedCategoryCleanupLocks.set(categoryId, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release?.();
+    if (retainedCategoryCleanupLocks.get(categoryId) === queued) {
+      retainedCategoryCleanupLocks.delete(categoryId);
+    }
+  }
+}
+
+/** Removes a deleted temp-channel record and its reset-retained category when it is the last one. */
+export async function finalizeDeletedTemporaryChannel(options: {
+  readonly record: TemporaryChannelRecord;
+  readonly channels: TemporaryChannelRepository;
+  readonly discord: DiscordApiPort;
+  readonly logger: Logger;
+}): Promise<boolean> {
+  const categoryId = options.record.cleanupCategoryId;
+  if (!categoryId) {
+    await options.channels.remove(options.record.channelId);
+    return true;
+  }
+
+  return withRetainedCategoryCleanupLock(categoryId, async () => {
+    const current = await options.channels.findByChannelId(options.record.channelId);
+    if (!current) return true;
+
+    const guildChannels = await options.channels.listByGuild(options.record.guildId);
+    const hasRetainedSibling = guildChannels.some(
+      (record) =>
+        record.channelId !== options.record.channelId &&
+        record.cleanupCategoryId === categoryId,
+    );
+
+    if (!hasRetainedSibling) {
+      const deletedCategory = await options.discord.deleteChannel({
+        channelId: categoryId,
+        requestId: `j2c-delete-retained-category:${categoryId}`,
+        reason: "join-to-create reset cleanup",
+      });
+      if (deletedCategory.kind !== "ok" && deletedCategory.kind !== "missing") {
+        options.logger.error("Retained Join-to-Create category deletion failed", {
+          guildId: options.record.guildId,
+          channelId: options.record.channelId,
+          categoryId,
+          result: deletedCategory.kind,
+        });
+        return false;
+      }
+      options.logger.info("Retained Join-to-Create category deleted", {
+        guildId: options.record.guildId,
+        categoryId,
+      });
+    }
+
+    await options.channels.remove(options.record.channelId);
+    return true;
+  });
 }
 
 export function createDeletionLifecycle(options: {
@@ -91,7 +166,16 @@ export function createDeletionLifecycle(options: {
         channelId,
         requestId: `j2c-delete-missing:${channelId}`,
       });
-      await options.channels.remove(channelId);
+      const finalized = await finalizeDeletedTemporaryChannel({
+        record,
+        channels: options.channels,
+        discord: options.discord,
+        logger: options.logger,
+      });
+      if (!finalized) {
+        options.metrics.increment("poisonedLifecycleOperations");
+        return;
+      }
       options.metrics.increment("deletionSuccesses");
       await refreshActiveGauge();
       options.logger.info("Temporary channel already missing; cleaned up", {
@@ -140,7 +224,16 @@ export function createDeletionLifecycle(options: {
     });
 
     if (deleted.kind === "ok" || deleted.kind === "missing") {
-      await options.channels.remove(channelId);
+      const finalized = await finalizeDeletedTemporaryChannel({
+        record: claimed,
+        channels: options.channels,
+        discord: options.discord,
+        logger: options.logger,
+      });
+      if (!finalized) {
+        options.metrics.increment("poisonedLifecycleOperations");
+        return;
+      }
       options.metrics.increment("deletionSuccesses");
       await refreshActiveGauge();
       options.logger.info("Temporary channel deleted", {

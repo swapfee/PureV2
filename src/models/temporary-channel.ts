@@ -59,6 +59,8 @@ const temporaryChannelSchema = new Schema(
     panelVersion: { type: Number, required: false, min: 1 },
     /** Owner ID rendered into the last successfully written panel (heading + button custom IDs). */
     panelOwnerId: { type: String, required: false, trim: true, match: SNOWFLAKE_PATTERN },
+    /** Category retained by factory reset until the final occupied temporary channel is deleted. */
+    cleanupCategoryId: { type: String, required: false, trim: true, match: SNOWFLAKE_PATTERN },
     emptySince: { type: Date, required: false },
     deletionAttemptedAt: { type: Date, required: false },
     deletionRequestId: { type: String, required: false, trim: true, maxlength: 80 },
@@ -126,6 +128,7 @@ export interface TemporaryChannelRecord {
   readonly panelMessageId?: string;
   readonly panelVersion?: number;
   readonly panelOwnerId?: string;
+  readonly cleanupCategoryId?: string;
   readonly emptySince?: Date;
   readonly deletionAttemptedAt?: Date;
   readonly deletionRequestId?: string;

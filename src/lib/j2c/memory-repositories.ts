@@ -296,6 +296,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
         ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
         ...(existing.panelOwnerId ? { panelOwnerId: existing.panelOwnerId } : {}),
+        ...(existing.cleanupCategoryId ? { cleanupCategoryId: existing.cleanupCategoryId } : {}),
         ...(emptySince ? { emptySince } : {}),
       };
       byChannel.set(channelId, next);
@@ -449,6 +450,7 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         ...(existing.panelMessageId ? { panelMessageId: existing.panelMessageId } : {}),
         ...(existing.panelVersion !== undefined ? { panelVersion: existing.panelVersion } : {}),
         ...(existing.panelOwnerId ? { panelOwnerId: existing.panelOwnerId } : {}),
+        ...(existing.cleanupCategoryId ? { cleanupCategoryId: existing.cleanupCategoryId } : {}),
         ...(ownerAbsentSince ? { ownerAbsentSince } : {}),
       };
       byChannel.set(channelId, next);
@@ -466,6 +468,21 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         panelMessageId,
         panelVersion,
         panelOwnerId,
+        updatedAt: new Date(),
+      };
+      byChannel.set(channelId, next);
+      return cloneTemp(next);
+    },
+
+    async setCleanupCategoryId(channelId, cleanupCategoryId) {
+      const existing = byChannel.get(channelId);
+      if (!existing) return undefined;
+      const next: TemporaryChannelRecord = {
+        ...existing,
+        occupantIds: [...existing.occupantIds],
+        rejectedUserIds: [...existing.rejectedUserIds],
+        appliedBlockUserIds: [...existing.appliedBlockUserIds],
+        cleanupCategoryId,
         updatedAt: new Date(),
       };
       byChannel.set(channelId, next);

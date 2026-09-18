@@ -1,6 +1,6 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort } from "../runtime-types.ts";
-import type { DeletionLifecycle } from "./deletion-lifecycle.ts";
+import { finalizeDeletedTemporaryChannel, type DeletionLifecycle } from "./deletion-lifecycle.ts";
 import type { J2cMetrics } from "./metrics.ts";
 import type { CreationReservationRepository, TemporaryChannelRepository } from "./repositories.ts";
 import type { Clock } from "./time.ts";
@@ -101,7 +101,19 @@ export function createReconciler(options: {
           channelId,
           requestId: `j2c-reconcile-missing:${channelId}`,
         });
-        await options.channels.remove(channelId);
+        const record = await options.channels.findByChannelId(channelId);
+        if (record) {
+          const finalized = await finalizeDeletedTemporaryChannel({
+            record,
+            channels: options.channels,
+            discord: options.discord,
+            logger: options.logger,
+          });
+          if (!finalized) {
+            options.metrics.increment("poisonedLifecycleOperations");
+            return;
+          }
+        }
         findings.push({ kind: "missing_discord_channel", channelId, guildId });
         options.metrics.increment("reconciliationFindings");
         options.logger.info("Reconciliation removed missing Discord channel record", {
@@ -154,8 +166,17 @@ export function createReconciler(options: {
             reason: "j2c reconciliation",
           });
           if (deleted.kind === "ok" || deleted.kind === "missing") {
-            await options.channels.remove(channelId);
-            options.metrics.increment("deletionSuccesses");
+            const finalized = await finalizeDeletedTemporaryChannel({
+              record,
+              channels: options.channels,
+              discord: options.discord,
+              logger: options.logger,
+            });
+            if (finalized) {
+              options.metrics.increment("deletionSuccesses");
+            } else {
+              options.metrics.increment("poisonedLifecycleOperations");
+            }
           } else {
             await options.channels.markStale(channelId, `reconcile_delete:${deleted.kind}`);
             options.metrics.increment("poisonedLifecycleOperations");

@@ -521,6 +521,66 @@ describe("empty-channel deletion lifecycle", () => {
     expect(metrics.snapshot().deletionSuccesses).toBe(1);
   });
 
+  test("deletes a reset-retained category after its final temporary channel empties", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const { discord, controls } = createFakeDiscord();
+    const firstChannelId = "676767676767676767";
+    const secondChannelId = "686868686868686868";
+    controls.channels.set(categoryId, {
+      id: categoryId,
+      name: "Join to Create",
+      guildId,
+      permissionOverwrites: [],
+    });
+
+    for (const [channelId, ownerId] of [
+      [firstChannelId, memberId],
+      [secondChannelId, "898989898989898989"],
+    ] as const) {
+      controls.channels.set(channelId, {
+        id: channelId,
+        name: "temp",
+        guildId,
+        permissionOverwrites: [],
+      });
+      await channels.create({
+        guildId,
+        channelId,
+        ownerId,
+        lobbyChannelId: lobbyId,
+        status: "active",
+        reservationId: `res-${channelId}`,
+        creationRequestId: `req-${channelId}`,
+        occupantIds: [ownerId],
+      });
+      await channels.setCleanupCategoryId(channelId, categoryId);
+    }
+
+    const deletion = createDeletionLifecycle({
+      channels,
+      discord,
+      metrics,
+      logger: testLogger(),
+      timers,
+      occupancy: readyOccupancy(),
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+
+    await deletion.onOccupantsChanged(firstChannelId, []);
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+    expect(controls.channels.has(categoryId)).toBe(true);
+
+    await deletion.onOccupantsChanged(secondChannelId, []);
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+    expect(controls.channels.has(categoryId)).toBe(false);
+    expect(await channels.findByChannelId(secondChannelId)).toBeUndefined();
+    expect(
+      controls.deleteCalls.some((call) => call.channelId === categoryId),
+    ).toBe(true);
+  });
+
   test("prevents duplicate deletes from concurrent beginDeleting races", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     const metrics = createJ2cMetrics();
@@ -559,6 +619,42 @@ describe("empty-channel deletion lifecycle", () => {
 });
 
 describe("startup reconciliation", () => {
+  test("cleans up a reset-retained category when its final voice channel is already missing", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    const missingChannelId = "696969696969696969";
+    controls.channels.set(categoryId, {
+      id: categoryId,
+      name: "Join to Create",
+      guildId,
+      permissionOverwrites: [],
+    });
+    await channels.create({
+      guildId,
+      channelId: missingChannelId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-reset-missing",
+      creationRequestId: "req-reset-missing",
+    });
+    await channels.setCleanupCategoryId(missingChannelId, categoryId);
+
+    const reconciler = createReconciler({
+      channels,
+      reservations,
+      discord,
+      metrics,
+      logger: testLogger(),
+    });
+
+    await reconciler.runDatabaseRest();
+    expect(await channels.findByChannelId(missingChannelId)).toBeUndefined();
+    expect(controls.channels.has(categoryId)).toBe(false);
+  });
+
   test("removes missing channels, recovers stuck creating, and bounds concurrency", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     const reservations = createMemoryCreationReservationRepository();
