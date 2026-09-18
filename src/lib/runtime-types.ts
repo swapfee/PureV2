@@ -140,8 +140,6 @@ export interface CreateVoiceChannelRequest {
   readonly name: string;
   readonly parentId: string;
   readonly userLimit?: number;
-  /** Discord channel sort position within the parent category. */
-  readonly position?: number;
   readonly requestId: string;
   readonly reason?: string;
 }
@@ -173,6 +171,13 @@ export interface DiscordApiPort {
   createVoiceChannel(
     request: CreateVoiceChannelRequest,
   ): Promise<DiscordValueResult<{ readonly id: string }>>;
+  setGuildChannelPosition(request: {
+    readonly guildId: string;
+    readonly channelId: string;
+    readonly position: number;
+    readonly requestId: string;
+    readonly reason?: string;
+  }): Promise<DiscordOperationResult>;
   createGuildChannel(
     request: CreateGuildChannelRequest,
   ): Promise<DiscordValueResult<{ readonly id: string }>>;

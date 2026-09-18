@@ -10,6 +10,7 @@ import type {
   TemporaryChannelRepository,
 } from "./repositories.ts";
 import {
+  channelPositionRequestId,
   compensateDeleteRequestId,
   creationRequestId,
   creationReservationId,
@@ -263,7 +264,6 @@ export function createCreationLifecycle(options: {
           name: channelName,
           parentId: config.categoryId,
           ...(config.defaultUserLimit === undefined ? {} : { userLimit: config.defaultUserLimit }),
-          ...(channelPosition === undefined ? {} : { position: channelPosition }),
           requestId: attemptRequestId,
           reason: "join-to-create",
         });
@@ -359,6 +359,40 @@ export function createCreationLifecycle(options: {
         await options.reservationService.fail(reservationId, "sequence_conflict_exhausted");
         options.metrics.increment("creationFailures");
         return { kind: "failed", reason: "sequence_conflict_exhausted" };
+      }
+
+      if (channelPosition !== undefined) {
+        const positioned = await options.discord.setGuildChannelPosition({
+          guildId: input.guildId,
+          channelId,
+          position: channelPosition,
+          requestId: channelPositionRequestId(input.eventId),
+          reason: "join-to-create channel hoist",
+        });
+        if (positioned.kind !== "ok") {
+          options.logger.error("Temporary channel position update failed", {
+            guildId: input.guildId,
+            channelId,
+            lobbyChannelId: config.lobbyChannelId,
+            requestedPosition: channelPosition,
+            result: positioned.kind,
+          });
+          await postGuildErrorLog({
+            discord: options.discord,
+            configs: options.configs,
+            logger: options.logger,
+            guildId: input.guildId,
+            requestId: `${channelPositionRequestId(input.eventId)}:error-log`,
+            entry: {
+              area: positioned.kind === "forbidden" ? "permissions" : "join_to_create",
+              summary: "Created a temporary voice channel but could not place it below the lobby.",
+              detail: `Discord outcome: \`${positioned.kind}\`.`,
+              solution: solutionForDiscordOutcome(positioned.kind),
+              userId: input.memberId,
+              channelId,
+            },
+          });
+        }
       }
 
       if (config.permissionSource === "lobby") {

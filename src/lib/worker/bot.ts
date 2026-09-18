@@ -180,7 +180,6 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
                 type: ChannelTypes.GuildVoice,
                 parent_id: request.parentId,
                 ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
-                ...(request.position === undefined ? {} : { position: request.position }),
               },
               headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
             },
@@ -190,6 +189,25 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         return { kind: "found" as const, value: { id: String(created.id) } };
       } catch (error) {
         return toDiscordValueResult(error);
+      }
+    },
+
+    async setGuildChannelPosition(request) {
+      try {
+        await bot.rest.makeRequest(
+          "PATCH",
+          bot.rest.routes.guilds.channels(request.guildId),
+          withReason(
+            {
+              body: [{ id: request.channelId, position: request.position }],
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
       }
     },
 

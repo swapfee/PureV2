@@ -8,6 +8,10 @@ export function creationRequestId(eventId: string): string {
   return `j2c-create:${eventId}`;
 }
 
+export function channelPositionRequestId(eventId: string): string {
+  return `j2c-position:${eventId}`;
+}
+
 export function deletionRequestId(channelId: string, emptySinceMs: number): string {
   return `j2c-delete:${channelId}:${emptySinceMs}`;
 }

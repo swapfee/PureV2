@@ -129,7 +129,7 @@ describe("creation lifecycle", () => {
     expect(outcome.kind).toBe("created");
     expect(controls.createCalls[0]?.name).toBe("Gaming 1");
     expect(controls.createCalls[0]?.userLimit).toBe(4);
-    expect(controls.createCalls[0]?.position).toBeUndefined();
+    expect(controls.positionCalls).toHaveLength(0);
     expect(controls.overwriteCalls.some((call) => call.overwriteId === memberId)).toBe(true);
     const stored = [...(await channels.listByGuild(guildId))];
     expect(stored[0]?.sequenceNumber).toBe(1);
@@ -168,7 +168,12 @@ describe("creation lifecycle", () => {
     });
 
     expect(outcome.kind).toBe("created");
-    expect(controls.createCalls[0]?.position).toBe(8);
+    const [stored] = await channels.listByGuild(guildId);
+    expect(controls.positionCalls).toHaveLength(1);
+    expect(controls.positionCalls[0]?.guildId).toBe(guildId);
+    expect(controls.positionCalls[0]?.channelId).toBe(stored?.channelId);
+    expect(controls.positionCalls[0]?.position).toBe(8);
+    expect(controls.positionCalls[0]?.requestId).toBe("j2c-position:event-top-hoist");
   });
 
   test("sequence naming gap-fills after a temporary channel is deleted", async () => {
@@ -219,7 +224,7 @@ describe("creation lifecycle", () => {
 
     expect(outcome.kind).toBe("created");
     expect(controls.createCalls[0]?.name).toBe("VC 2");
-    expect(controls.createCalls[0]?.position).toBeUndefined();
+    expect(controls.positionCalls).toHaveLength(0);
   });
 
   test("sequence naming retries when two joins race for the same number", async () => {

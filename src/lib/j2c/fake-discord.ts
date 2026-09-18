@@ -39,6 +39,12 @@ export interface FakeDiscordControls {
   readonly users: Map<string, { id: string; bot: boolean; username?: string; globalName?: string }>;
   readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string }>;
   readonly createCalls: CreateVoiceChannelRequest[];
+  readonly positionCalls: {
+    guildId: string;
+    channelId: string;
+    position: number;
+    requestId: string;
+  }[];
   readonly guildChannelCreates: CreateGuildChannelRequest[];
   readonly deleteCalls: { channelId: string; requestId: string }[];
   readonly moveCalls: { guildId: string; userId: string; channelId: string | null; requestId: string }[];
@@ -128,6 +134,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
     users: seed?.users ?? new Map(),
     members: seed?.members ?? new Map(),
     createCalls: [],
+    positionCalls: [],
     guildChannelCreates: [],
     deleteCalls: [],
     moveCalls: [],
@@ -224,12 +231,24 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         name: request.name,
         type: ChannelTypes.GuildVoice,
         parentId: request.parentId,
-        ...(request.position === undefined ? {} : { position: request.position }),
         ...(request.userLimit === undefined ? {} : { userLimit: request.userLimit }),
         guildId: request.guildId,
         permissionOverwrites: [],
       });
       return { kind: "found", value: { id } };
+    },
+
+    async setGuildChannelPosition(request) {
+      controls.positionCalls.push({
+        guildId: request.guildId,
+        channelId: request.channelId,
+        position: request.position,
+        requestId: request.requestId,
+      });
+      const channel = controls.channels.get(request.channelId);
+      if (!channel) return { kind: "missing" };
+      channel.position = request.position;
+      return { kind: "ok" };
     },
 
     async createGuildChannel(request) {

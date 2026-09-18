@@ -11,6 +11,7 @@ describe("coordinator Discord REST port", () => {
       routes: {
         user: (userId: string) => `/users/${userId}`,
         guilds: {
+          channels: (guildId: string) => `/guilds/${guildId}/channels`,
           members: {
             member: (guildId: string, userId: string) =>
               `/guilds/${guildId}/members/${userId}`,
@@ -104,12 +105,22 @@ describe("coordinator Discord REST port", () => {
       content: "panel",
       requestId: "panel-request",
     })).toEqual({ kind: "found", value: { id: "message" } });
+    expect(await discord.setGuildChannelPosition({
+      guildId: "guild",
+      channelId: "channel",
+      position: 5,
+      requestId: "position-request",
+    })).toEqual({ kind: "ok" });
 
     expect(calls.some((call) =>
       call.method === "PUT" && call.route === "/channels/channel/permissions/member"
     )).toBe(true);
     expect(calls.some((call) =>
       call.method === "POST" && call.route === "/channels/channel/messages"
+    )).toBe(true);
+    expect(calls.some((call) =>
+      call.method === "PATCH" && call.route === "/guilds/guild/channels" &&
+      JSON.stringify(call.body) === JSON.stringify([{ id: "channel", position: 5 }])
     )).toBe(true);
   });
 });
