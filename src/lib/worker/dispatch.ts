@@ -112,7 +112,10 @@ export function createInteractionDispatcher(
   logger: Logger,
   discord: DiscordApiPort,
   services?: {
-    readonly vc?: { execute(interaction: InteractionCreatePayload): Promise<void> };
+    readonly vc?: {
+      handles?(interaction: InteractionCreatePayload): boolean;
+      execute(interaction: InteractionCreatePayload): Promise<void>;
+    };
     readonly setup?: {
       execute(interaction: InteractionCreatePayload): Promise<void>;
     };
@@ -126,6 +129,11 @@ export function createInteractionDispatcher(
     async dispatch(interaction: InteractionCreatePayload): Promise<void> {
       if (services?.voicePanel?.handles(interaction)) {
         await services.voicePanel.execute(interaction);
+        return;
+      }
+
+      if (services?.vc?.handles?.(interaction)) {
+        await services.vc.execute(interaction);
         return;
       }
 

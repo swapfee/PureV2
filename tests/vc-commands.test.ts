@@ -8,7 +8,11 @@ import {
   createMemoryOwnerBlockListRepository,
   createMemoryTemporaryChannelRepository,
 } from "../src/lib/j2c/memory-repositories.ts";
-import { createVcCommandService, VC_COOLDOWNS_MS } from "../src/lib/j2c/vc-command-service.ts";
+import {
+  createVcCommandService,
+  VC_COOLDOWNS_MS,
+  VC_REJECT_SELECT_PREFIX,
+} from "../src/lib/j2c/vc-command-service.ts";
 import { createVcMetrics } from "../src/lib/j2c/vc-metrics.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
@@ -16,6 +20,7 @@ import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 const guildId = "123456789012345678";
 const ownerId = "999999999999999999";
 const targetId = "888888888888888888";
+const secondTargetId = "666666666666666666";
 const botUserId = "777777777777777777";
 const channelId = "444444444444444444";
 const lobbyId = "222222222222222222";
@@ -34,18 +39,23 @@ function interaction(
     readonly guildId?: string | null;
     readonly channelId?: string;
     readonly options?: InteractionCreatePayload["options"];
+    readonly type?: number;
+    readonly customId?: string;
+    readonly selectedUserIds?: readonly string[];
   },
 ): InteractionCreatePayload {
   return {
     id: partial.id ?? "100000000000000001",
     token: partial.token ?? "interaction-token",
-    type: 2,
+    type: partial.type ?? 2,
     applicationId: "555555555555555555",
     userId: partial.userId ?? ownerId,
     commandName: "vc",
     ...(partial.guildId ? { guildId: partial.guildId } : {}),
     ...(partial.channelId ? { channelId: partial.channelId } : {}),
     ...(partial.options ? { options: partial.options } : {}),
+    ...(partial.customId ? { customId: partial.customId } : {}),
+    ...(partial.selectedUserIds ? { selectedUserIds: partial.selectedUserIds } : {}),
   };
 }
 
@@ -594,6 +604,85 @@ describe("/vc command family", () => {
       }),
     );
     expect(embedText(controls.editedInteractions.at(-1))).toMatch(/already rejected/i);
+  });
+
+  test("reject opens a multi-user selector and rejects every selected member", async () => {
+    const { vc, controls, channels, metrics } = await setup();
+    controls.users.set(secondTargetId, { id: secondTargetId, bot: false });
+    controls.voiceByUser.set(`${guildId}:${targetId}`, channelId);
+    controls.voiceByUser.set(`${guildId}:${secondTargetId}`, channelId);
+    await channels.setOccupants(
+      channelId,
+      [ownerId, targetId, secondTargetId],
+      null,
+    );
+
+    await vc.execute(
+      interaction({
+        id: "reject-select-open",
+        guildId,
+        options: [{ name: "reject", type: 1 }],
+      }),
+    );
+
+    const prompt = controls.editedInteractions.at(-1);
+    const row = prompt?.components?.[0];
+    const component =
+      typeof row === "object" && row !== null && Array.isArray(Reflect.get(row, "components"))
+        ? Reflect.get(row, "components")[0]
+        : undefined;
+    expect(prompt?.embeds?.[0]?.title).toBe("Reject Members");
+    expect(Reflect.get(component ?? {}, "type")).toBe(3);
+    expect(Reflect.get(component ?? {}, "max_values")).toBe(2);
+    expect(Reflect.get(component ?? {}, "custom_id")).toBe(
+      `${VC_REJECT_SELECT_PREFIX}:${channelId}`,
+    );
+    const selectOptions = Reflect.get(component ?? {}, "options");
+    expect(Array.isArray(selectOptions)).toBe(true);
+    expect(
+      (Array.isArray(selectOptions) ? selectOptions : []).map((option) =>
+        Reflect.get(option ?? {}, "value"),
+      ),
+    ).toEqual([targetId, secondTargetId]);
+
+    await vc.execute(
+      interaction({
+        id: "reject-select-submit",
+        type: 3,
+        guildId,
+        customId: `${VC_REJECT_SELECT_PREFIX}:${channelId}`,
+        selectedUserIds: [targetId, secondTargetId, ownerId],
+      }),
+    );
+
+    const record = await channels.findByChannelId(channelId);
+    expect(record?.rejectedUserIds).toContain(targetId);
+    expect(record?.rejectedUserIds).toContain(secondTargetId);
+    expect(record?.rejectedUserIds).not.toContain(ownerId);
+    expect(
+      controls.moveCalls.some((call) => call.userId === targetId && call.channelId === null),
+    ).toBe(true);
+    expect(controls.overwriteCalls.some((call) => call.overwriteId === secondTargetId)).toBe(true);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/rejected.*888.*666/is);
+    expect(embedText(controls.editedInteractions.at(-1))).toMatch(/cannot reject yourself/i);
+    expect(metrics.snapshot().successes.reject).toBe(1);
+  });
+
+  test("reject shows a formal empty state when the owner is alone", async () => {
+    const { vc, controls } = await setup();
+
+    await vc.execute(
+      interaction({
+        id: "reject-select-empty",
+        guildId,
+        options: [{ name: "reject", type: 1 }],
+      }),
+    );
+
+    const response = controls.editedInteractions.at(-1);
+    expect(response?.embeds?.[0]?.title).toBe("No Members Available");
+    expect(response?.embeds?.[0]?.description).toMatch(/no other members currently connected/i);
+    expect(response?.components).toEqual([]);
   });
 
   test("lock still repairs when Mongo and Discord disagree", async () => {
