@@ -3,6 +3,7 @@ import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import { cooldownFailureMessage } from "../discord-timestamp.ts";
 import { failureResponse, successResponse, type ActionMessage } from "./action-response.ts";
+import { postGuildErrorLog, solutionForDiscordOutcome } from "./guild-error-log.ts";
 import {
   authorizeVcConnectedMember,
   authorizeVcOwner,
@@ -372,6 +373,23 @@ export function createVcCommandService(options: {
             subcommand,
             error: error instanceof Error ? error.message : String(error),
           });
+          if (options.configs) {
+            await postGuildErrorLog({
+              discord: options.discord,
+              configs: options.configs,
+              logger: options.logger,
+              guildId,
+              requestId: `vc:${subcommand}:${interaction.id}:error-log`,
+              entry: {
+                area: "voice_management",
+                summary: `Unexpected failure while running \`/vc ${subcommand}\`.`,
+                detail: error instanceof Error ? error.message : String(error),
+                solution:
+                  "Retry the command. Confirm the bot still has access to the channel, then try again.",
+                userId: interaction.userId,
+              },
+            });
+          }
           await reply(
             interaction,
             deferred,
@@ -1554,6 +1572,7 @@ export function createVcCommandService(options: {
                 channelId: auth.channel.channelId,
                 newOwnerId: targetUserId,
                 requestId: `${requestId}:blocks`,
+                ...(options.configs ? { configs: options.configs } : {}),
               });
             }
           } catch (error) {
@@ -1580,6 +1599,23 @@ export function createVcCommandService(options: {
           if (deleted.kind !== "ok" && deleted.kind !== "missing") {
             options.metrics.restFailure();
             options.logger.warn("VC delete failed", { ...baseLog, outcome: deleted.kind });
+            if (options.configs) {
+              await postGuildErrorLog({
+                discord: options.discord,
+                configs: options.configs,
+                logger: options.logger,
+                guildId: auth.channel.guildId,
+                requestId: `${requestId}:error-log`,
+                entry: {
+                  area: deleted.kind === "forbidden" ? "permissions" : "voice_management",
+                  summary: "Failed to delete a temporary voice channel via `/vc delete`.",
+                  detail: `Discord outcome: \`${deleted.kind}\`.`,
+                  solution: solutionForDiscordOutcome(deleted.kind),
+                  userId: interaction.userId,
+                  channelId: auth.channel.channelId,
+                },
+              });
+            }
             await reply(interaction, deferred, failureResponse("Unable to delete the channel."));
             return;
           }
@@ -1592,6 +1628,24 @@ export function createVcCommandService(options: {
           ...baseLog,
           error: error instanceof Error ? error.message : "unknown",
         });
+        if (options.configs) {
+          await postGuildErrorLog({
+            discord: options.discord,
+            configs: options.configs,
+            logger: options.logger,
+            guildId: auth.channel.guildId,
+            requestId: `${requestId}:error-log`,
+            entry: {
+              area: "voice_management",
+              summary: `Unexpected failure while running \`/vc ${subcommand}\`.`,
+              detail: error instanceof Error ? error.message : String(error),
+              solution:
+                "Retry the command. Confirm the bot has Manage Channels / Connect permissions in this category.",
+              userId: interaction.userId,
+              channelId: auth.channel.channelId,
+            },
+          });
+        }
         await reply(
           interaction,
           deferred,

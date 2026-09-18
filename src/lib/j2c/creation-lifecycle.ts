@@ -24,6 +24,7 @@ import type { Clock } from "./time.ts";
 import { systemClock } from "./time.ts";
 import { synchronizeTemporaryChannelAccess } from "./voice-controls.ts";
 import { installVoiceControlPanel } from "./voice-panel-service.ts";
+import { postGuildErrorLog, solutionForDiscordOutcome } from "./guild-error-log.ts";
 
 const MAX_SEQUENCE_CREATE_ATTEMPTS = 5;
 
@@ -260,6 +261,21 @@ export function createCreationLifecycle(options: {
             result: created.kind,
             attempt,
           });
+          await postGuildErrorLog({
+            discord: options.discord,
+            configs: options.configs,
+            logger: options.logger,
+            guildId: input.guildId,
+            requestId: `${attemptRequestId}:error-log`,
+            entry: {
+              area: created.kind === "forbidden" ? "permissions" : "join_to_create",
+              summary: "Failed to create a temporary voice channel after a Join to Create join.",
+              detail: `Discord outcome: \`${created.kind}\`.`,
+              solution: solutionForDiscordOutcome(created.kind),
+              userId: input.memberId,
+              channelId: config.lobbyChannelId,
+            },
+          });
           return { kind: "failed", reason: `create_failed:${created.kind}` };
         }
 
@@ -366,6 +382,22 @@ export function createCreationLifecycle(options: {
               channelId,
               failedUserIds: sync.failedUserIds,
             });
+            await postGuildErrorLog({
+              discord: options.discord,
+              configs: options.configs,
+              logger: options.logger,
+              guildId: input.guildId,
+              requestId: `${createReqId}:error-log-blocks`,
+              entry: {
+                area: "block_list",
+                summary: "Could not fully apply the owner's block list on a new temporary channel.",
+                detail: `Failed user ids: ${sync.failedUserIds.join(", ") || "unknown"}.`,
+                solution:
+                  "Confirm the bot can Manage Permissions on temporary channels, then ask the owner to re-block affected members or transfer ownership to resync.",
+                userId: input.memberId,
+                channelId,
+              },
+            });
           }
         }
       }
@@ -381,6 +413,7 @@ export function createCreationLifecycle(options: {
           botUserId: botUser.value.id,
           botUsername: botUser.value.username,
           requestId: createReqId,
+          configs: options.configs,
         });
       } else {
         options.logger.warn("Voice panel skipped; bot user unavailable", {

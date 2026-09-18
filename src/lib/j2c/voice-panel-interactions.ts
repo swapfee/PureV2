@@ -630,6 +630,7 @@ async function handlePanelButton(input: {
         channelId,
         newOwnerId: input.interaction.userId,
         requestId: `panel:claim:${input.interaction.id}:blocks`,
+        ...(input.configs ? { configs: input.configs } : {}),
       });
     }
     await replyEphemeral(
@@ -910,6 +911,7 @@ async function handleTransferSelect(input: {
       channelId,
       newOwnerId: targetUserId,
       requestId: `panel:transfer:${input.interaction.id}:blocks`,
+      ...(input.configs ? { configs: input.configs } : {}),
     });
   }
 

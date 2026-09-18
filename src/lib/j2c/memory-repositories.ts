@@ -19,6 +19,9 @@ import type {
 function cloneGuild(record: GuildConfigRecord): GuildConfigRecord {
   return {
     ...record,
+    ...(record.errorLogChannelId === undefined
+      ? {}
+      : { errorLogChannelId: record.errorLogChannelId }),
     moderatorRoleIds: [...record.moderatorRoleIds],
     createdAt: new Date(record.createdAt),
     updatedAt: new Date(record.updatedAt),
@@ -58,6 +61,9 @@ function buildGuildConfigRecord(
     enabled: validated.enabled,
     lobbyChannelId: validated.lobbyChannelId,
     categoryId: validated.categoryId,
+    ...(validated.errorLogChannelId === undefined
+      ? {}
+      : { errorLogChannelId: validated.errorLogChannelId }),
     channelNameTemplate: validated.channelNameTemplate,
     ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
     ownerCanEdit: validated.ownerCanEdit ?? false,

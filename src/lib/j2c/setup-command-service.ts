@@ -16,9 +16,11 @@ import {
 import { runFactoryReset } from "./factory-reset.ts";
 import {
   DEFAULT_SETUP_CATEGORY_NAME,
+  DEFAULT_SETUP_ERROR_LOG_NAME,
   DEFAULT_SETUP_LOBBY_NAME,
   normalizeSetupChannelName,
 } from "./setup-channel-names.ts";
+import { hardenErrorLogChannelAccess } from "./guild-error-log.ts";
 import { GuildConfigValidationError, validateUpsertGuildConfigInput } from "./validation.ts";
 import type {
   CreationReservationRepository,
@@ -262,7 +264,66 @@ export function createSetupCommandService(options: {
 
     const lobbyChannelId = lobbyCreated.value.id;
 
+    const errorLogCreated = await discord.createGuildChannel({
+      guildId,
+      name: DEFAULT_SETUP_ERROR_LOG_NAME,
+      type: ChannelTypes.GuildText,
+      parentId: categoryId,
+      requestId: `setup:${interaction.id}:error-log`,
+      reason: setupReason,
+    });
+    if (errorLogCreated.kind !== "found") {
+      await discord.deleteChannel({
+        channelId: lobbyChannelId,
+        requestId: `setup:${interaction.id}:compensate-lobby`,
+        reason: setupReason,
+      });
+      await discord.deleteChannel({
+        channelId: categoryId,
+        requestId: `setup:${interaction.id}:compensate-category`,
+        reason: setupReason,
+      });
+      await finish(createFailureMessage(errorLogCreated, "create the error-log channel"));
+      return;
+    }
+    const errorLogChannelId = errorLogCreated.value.id;
+
+    const botUser = await discord.getCurrentUser();
+    if (botUser.kind === "found") {
+      await hardenErrorLogChannelAccess({
+        discord,
+        guildId,
+        channelId: errorLogChannelId,
+        botUserId: botUser.value.id,
+        requestId: `setup:${interaction.id}:error-log`,
+      });
+    }
+
+    await discord.sendChannelMessage({
+      channelId: errorLogChannelId,
+      requestId: `setup:${interaction.id}:error-log-intro`,
+      embeds: [
+        {
+          title: "Error log ready",
+          color: 0x57_f2_87,
+          description: [
+            "This channel records Join to Create, voice management, block list, and permission problems for this server.",
+            "",
+            "Each entry includes what happened and a possible solution.",
+            "If problems continue after those steps, contact the bot developer with your server ID and the time of the error.",
+            "",
+            "Keep this channel private to staff. The bot needs View Channel and Send Messages here.",
+          ].join("\n"),
+        },
+      ],
+    });
+
     const compensateCreatedChannels = async (): Promise<void> => {
+      await discord.deleteChannel({
+        channelId: errorLogChannelId,
+        requestId: `setup:${interaction.id}:compensate-error-log`,
+        reason: setupReason,
+      });
       await discord.deleteChannel({
         channelId: lobbyChannelId,
         requestId: `setup:${interaction.id}:compensate-lobby`,
@@ -281,6 +342,7 @@ export function createSetupCommandService(options: {
         enabled: true,
         lobbyChannelId,
         categoryId,
+        errorLogChannelId,
         channelNameTemplate: DEFAULT_CHANNEL_NAME_TEMPLATE,
         ownerCanEdit: false,
         permissionSource: "category",
@@ -300,6 +362,7 @@ export function createSetupCommandService(options: {
         guildId: created.record.guildId,
         lobbyChannelId: created.record.lobbyChannelId,
         categoryId: created.record.categoryId,
+        errorLogChannelId: created.record.errorLogChannelId,
         namingMode: created.record.namingMode,
         userId: interaction.userId,
       });
@@ -395,6 +458,9 @@ export function createSetupCommandService(options: {
           enabled: existing.enabled,
           lobbyChannelId: existing.lobbyChannelId,
           categoryId,
+          ...(existing.errorLogChannelId === undefined
+            ? {}
+            : { errorLogChannelId: existing.errorLogChannelId }),
           channelNameTemplate,
           ...(defaultUserLimit === undefined ? {} : { defaultUserLimit }),
           ownerCanEdit,

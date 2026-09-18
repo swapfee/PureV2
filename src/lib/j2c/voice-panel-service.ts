@@ -1,6 +1,7 @@
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, DiscordOperationResult } from "../runtime-types.ts";
-import type { TemporaryChannelRepository } from "./repositories.ts";
+import type { GuildConfigRepository, TemporaryChannelRepository } from "./repositories.ts";
+import { postGuildErrorLog, solutionForDiscordOutcome } from "./guild-error-log.ts";
 import { grantBotPanelTextAccess } from "./voice-panel-access.ts";
 import {
   buildVoiceControlPanelComponents,
@@ -87,6 +88,7 @@ export async function installVoiceControlPanel(options: {
   readonly botUserId: string;
   readonly botUsername: string;
   readonly requestId: string;
+  readonly configs?: GuildConfigRepository;
 }): Promise<void> {
   await withChannelPanelLock(options.channelId, async () => {
     try {
@@ -126,6 +128,23 @@ export async function installVoiceControlPanel(options: {
           channelId: options.channelId,
           outcome: sent.kind,
         });
+        if (options.configs) {
+          await postGuildErrorLog({
+            discord: options.discord,
+            configs: options.configs,
+            logger: options.logger,
+            guildId: options.guildId,
+            requestId: `${options.requestId}:error-log-panel`,
+            entry: {
+              area: sent.kind === "forbidden" ? "permissions" : "voice_management",
+              summary: "Failed to post the voice control panel in a temporary channel.",
+              detail: `Discord outcome: \`${sent.kind}\`. The channel remains usable with /vc commands.`,
+              solution: solutionForDiscordOutcome(sent.kind),
+              userId: options.ownerId,
+              channelId: options.channelId,
+            },
+          });
+        }
         return;
       }
 

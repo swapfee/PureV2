@@ -26,6 +26,13 @@ const guildConfigSchema = new Schema(
     enabled: { type: Boolean, required: true, default: false },
     lobbyChannelId: { ...snowflakeString },
     categoryId: { ...snowflakeString },
+    /** Text channel for Join-to-Create / VC operational errors (optional for legacy guilds). */
+    errorLogChannelId: {
+      type: String,
+      required: false,
+      trim: true,
+      match: SNOWFLAKE_PATTERN,
+    },
     channelNameTemplate: {
       type: String,
       required: true,
@@ -104,6 +111,7 @@ export interface GuildConfigRecord {
   readonly enabled: boolean;
   readonly lobbyChannelId: string;
   readonly categoryId: string;
+  readonly errorLogChannelId?: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
   readonly ownerCanEdit: boolean;
@@ -120,6 +128,7 @@ export interface UpsertGuildConfigInput {
   readonly enabled: boolean;
   readonly lobbyChannelId: string;
   readonly categoryId: string;
+  readonly errorLogChannelId?: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
   readonly ownerCanEdit?: boolean;

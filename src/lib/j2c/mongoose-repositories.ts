@@ -26,6 +26,7 @@ function toGuildRecord(doc: {
   enabled: boolean;
   lobbyChannelId: string;
   categoryId: string;
+  errorLogChannelId?: string | null;
   channelNameTemplate: string;
   defaultUserLimit?: number | null;
   ownerCanEdit?: boolean | null;
@@ -44,6 +45,9 @@ function toGuildRecord(doc: {
     enabled: doc.enabled,
     lobbyChannelId: doc.lobbyChannelId,
     categoryId: doc.categoryId,
+    ...(doc.errorLogChannelId && typeof doc.errorLogChannelId === "string"
+      ? { errorLogChannelId: doc.errorLogChannelId }
+      : {}),
     channelNameTemplate: doc.channelNameTemplate,
     ...(doc.defaultUserLimit === undefined || doc.defaultUserLimit === null
       ? {}
@@ -153,6 +157,9 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
           enabled: validated.enabled,
           lobbyChannelId: validated.lobbyChannelId,
           categoryId: validated.categoryId,
+          ...(validated.errorLogChannelId === undefined
+            ? {}
+            : { errorLogChannelId: validated.errorLogChannelId }),
           channelNameTemplate: validated.channelNameTemplate,
           ...(validated.defaultUserLimit === undefined
             ? {}
@@ -188,17 +195,26 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
         namingMode: validated.namingMode ?? "template",
         sequenceNext: validated.sequenceNext ?? 1,
       };
+      if (validated.errorLogChannelId !== undefined) {
+        setFields.errorLogChannelId = validated.errorLogChannelId;
+      }
       const update =
         validated.defaultUserLimit === undefined
           ? {
               $set: setFields,
-              $unset: { defaultUserLimit: 1 },
+              $unset: {
+                defaultUserLimit: 1,
+                ...(validated.errorLogChannelId === undefined ? { errorLogChannelId: 1 } : {}),
+              },
             }
           : {
               $set: {
                 ...setFields,
                 defaultUserLimit: validated.defaultUserLimit,
               },
+              ...(validated.errorLogChannelId === undefined
+                ? { $unset: { errorLogChannelId: 1 } }
+                : {}),
             };
       const doc = await GuildConfigModel.findOneAndUpdate({ guildId: validated.guildId }, update, {
         upsert: true,

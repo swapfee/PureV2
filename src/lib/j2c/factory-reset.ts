@@ -114,6 +114,21 @@ export async function runFactoryReset(options: {
     });
   }
 
+  if (config.errorLogChannelId) {
+    const errorLogDelete = await options.discord.deleteChannel({
+      channelId: config.errorLogChannelId,
+      requestId: `setup-reset:${options.interactionId}:error-log`,
+      reason,
+    });
+    if (errorLogDelete.kind !== "ok" && errorLogDelete.kind !== "missing") {
+      options.logger.warn("Factory reset failed to delete error-log channel", {
+        guildId: options.guildId,
+        channelId: config.errorLogChannelId,
+        outcome: errorLogDelete.kind,
+      });
+    }
+  }
+
   let deletedCategory = false;
   let keptCategory = false;
   let renamedCategory = false;

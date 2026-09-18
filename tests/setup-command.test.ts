@@ -68,17 +68,20 @@ describe("/setup command", () => {
     expect(replies[0]).toContain("<:error:1543407530380624037>");
   });
 
-  test("/setup create creates category and lobby then saves guild config", async () => {
+  test("/setup create creates category, lobby, and private error-log channel", async () => {
     const { setup, controls, configs } = createSetupDeps();
+    controls.currentUser = { id: "111111111111111111", username: "PureV2" };
 
     await setup.execute(baseInteraction());
 
     expect(controls.deferredInteractions).toEqual(["987654321098765432"]);
-    expect(controls.guildChannelCreates).toHaveLength(2);
+    expect(controls.guildChannelCreates).toHaveLength(3);
     expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
     expect(controls.guildChannelCreates[0]?.name).toBe(DEFAULT_SETUP_CATEGORY_NAME);
     expect(controls.guildChannelCreates[1]?.type).toBe(ChannelTypes.GuildVoice);
     expect(controls.guildChannelCreates[1]?.name).toBe(DEFAULT_SETUP_LOBBY_NAME);
+    expect(controls.guildChannelCreates[2]?.type).toBe(ChannelTypes.GuildText);
+    expect(controls.guildChannelCreates[2]?.name).toBe("error-logs");
 
     const categoryId = [...controls.channels.values()].find(
       (channel) =>
@@ -92,15 +95,23 @@ describe("/setup command", () => {
     expect(categoryId).toBeDefined();
     expect(lobbyId).toBeDefined();
     expect(controls.guildChannelCreates[1]?.parentId).toBe(categoryId);
+    expect(controls.guildChannelCreates[2]?.parentId).toBe(categoryId);
 
     const saved = await configs.findByGuildId("123456789012345678");
     expect(saved?.enabled).toBe(true);
     expect(saved?.lobbyChannelId).toBe(lobbyId);
     expect(saved?.categoryId).toBe(categoryId);
+    expect(saved?.errorLogChannelId).toBeDefined();
     expect(saved?.channelNameTemplate).toBe("{username}'s channel");
     expect(saved?.ownerCanEdit).toBe(false);
     expect(saved?.permissionSource).toBe("category");
     expect(saved?.namingMode).toBe("template");
+    expect(controls.overwriteCalls.some((call) => call.overwriteId === "123456789012345678")).toBe(
+      true,
+    );
+    expect(controls.channelMessages.some((msg) => msg.channelId === saved?.errorLogChannelId)).toBe(
+      true,
+    );
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Complete/i);
   });
 
@@ -242,7 +253,7 @@ describe("/setup command", () => {
     );
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/\/setup config/i);
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/\/reset/i);
-    expect(controls.guildChannelCreates).toHaveLength(2);
+    expect(controls.guildChannelCreates).toHaveLength(3);
     const stillFirst = await configs.findByGuildId("123456789012345678");
     expect(stillFirst?.lobbyChannelId).toBe(first!.lobbyChannelId);
     expect(stillFirst?.categoryId).toBe(first!.categoryId);
