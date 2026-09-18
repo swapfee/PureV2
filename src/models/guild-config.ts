@@ -20,6 +20,9 @@ export type GuildPermissionSource = (typeof GUILD_PERMISSION_SOURCES)[number];
 export const GUILD_NAMING_MODES = ["template", "sequence"] as const;
 export type GuildNamingMode = (typeof GUILD_NAMING_MODES)[number];
 
+export const GUILD_CHANNEL_HOISTS = ["top", "bottom"] as const;
+export type GuildChannelHoist = (typeof GUILD_CHANNEL_HOISTS)[number];
+
 const guildConfigSchema = new Schema(
   {
     guildId: { ...snowflakeString, unique: true, index: true },
@@ -81,6 +84,13 @@ const guildConfigSchema = new Schema(
       min: 1,
       default: 1,
     },
+    /** Placement of newly created temporary voice channels below the lobby. */
+    channelHoist: {
+      type: String,
+      required: true,
+      enum: GUILD_CHANNEL_HOISTS,
+      default: "bottom",
+    },
     moderatorRoleIds: {
       type: [String],
       required: true,
@@ -126,6 +136,7 @@ export interface GuildConfigRecord {
   readonly permissionSource: GuildPermissionSource;
   readonly namingMode: GuildNamingMode;
   readonly sequenceNext: number;
+  readonly channelHoist: GuildChannelHoist;
   readonly moderatorRoleIds: readonly string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -144,5 +155,6 @@ export interface UpsertGuildConfigInput {
   readonly permissionSource?: GuildPermissionSource;
   readonly namingMode?: GuildNamingMode;
   readonly sequenceNext?: number;
+  readonly channelHoist?: GuildChannelHoist;
   readonly moderatorRoleIds?: readonly string[];
 }

@@ -106,6 +106,8 @@ export interface DiscordChannelDetails {
   readonly id: string;
   readonly name?: string;
   readonly type?: number;
+  /** Discord sort position within the channel's category/group. */
+  readonly position?: number;
   readonly userLimit?: number;
   readonly bitrate?: number;
   readonly nsfw?: boolean;

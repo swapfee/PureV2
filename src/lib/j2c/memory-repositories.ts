@@ -76,6 +76,7 @@ function buildGuildConfigRecord(
     permissionSource: validated.permissionSource ?? "category",
     namingMode: validated.namingMode ?? "template",
     sequenceNext: validated.sequenceNext ?? 1,
+    channelHoist: validated.channelHoist ?? "bottom",
     moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,

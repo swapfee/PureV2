@@ -66,6 +66,16 @@ const setupCommandData: CreateApplicationCommand = {
             { name: "Join to Create", value: "lobby" },
           ],
         },
+        {
+          type: ApplicationCommandOptionTypes.String,
+          name: "hoist",
+          description: "Place new temporary channels at the top or bottom below the lobby",
+          required: false,
+          choices: [
+            { name: "Top", value: "top" },
+            { name: "Bottom", value: "bottom" },
+          ],
+        },
       ],
     },
     {

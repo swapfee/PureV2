@@ -126,6 +126,7 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
           id: string | number | bigint;
           name?: string;
           type?: number;
+          position?: number;
         }>("GET", rest.routes.channels.channel(request.channelId));
         return {
           kind: "found" as const,
@@ -133,6 +134,7 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
             id: String(channel.id),
             ...(channel.name === undefined ? {} : { name: channel.name }),
             ...(channel.type === undefined ? {} : { type: channel.type }),
+            ...(channel.position === undefined ? {} : { position: channel.position }),
           },
         };
       } catch (error) {

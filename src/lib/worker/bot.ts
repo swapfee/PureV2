@@ -244,6 +244,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           id: string | number | bigint;
           name?: string;
           type?: number;
+          position?: number;
           user_limit?: number;
           bitrate?: number;
           nsfw?: boolean;
@@ -258,6 +259,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
             id: String(channel.id),
             ...(channel.name === undefined ? {} : { name: channel.name }),
             ...(channel.type === undefined ? {} : { type: channel.type }),
+            ...(channel.position === undefined ? {} : { position: channel.position }),
             ...(channel.user_limit === undefined ? {} : { userLimit: channel.user_limit }),
             ...(channel.bitrate === undefined ? {} : { bitrate: channel.bitrate }),
             ...(channel.nsfw === undefined ? {} : { nsfw: channel.nsfw }),

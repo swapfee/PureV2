@@ -137,6 +137,7 @@ function configInputWithInterface(
     permissionSource: record.permissionSource,
     namingMode: record.namingMode,
     sequenceNext: record.sequenceNext,
+    channelHoist: record.channelHoist,
     moderatorRoleIds: [...record.moderatorRoleIds],
   };
 }
@@ -384,6 +385,7 @@ export function createSetupCommandService(options: {
         permissionSource: "category",
         namingMode: "template",
         sequenceNext: 1,
+        channelHoist: "bottom",
         moderatorRoleIds: [],
       });
 
@@ -572,13 +574,15 @@ export function createSetupCommandService(options: {
     const limitRaw = optionValue(subOptions, "limit");
     const categoryRaw = optionValue(subOptions, "category");
     const permissionRaw = optionValue(subOptions, "permission");
+    const hoistRaw = optionValue(subOptions, "hoist");
 
     if (
       editableRaw === undefined &&
       nameRaw === undefined &&
       limitRaw === undefined &&
       categoryRaw === undefined &&
-      permissionRaw === undefined
+      permissionRaw === undefined &&
+      hoistRaw === undefined
     ) {
       await finish(failureResponse("Specify at least one setting to update."));
       return;
@@ -617,6 +621,13 @@ export function createSetupCommandService(options: {
       permissionRaw === undefined
         ? existing.permissionSource
         : parsePermissionSource(permissionRaw);
+    if (hoistRaw !== undefined && hoistRaw !== "top" && hoistRaw !== "bottom") {
+      await finish(failureResponse("Hoist must be top or bottom."));
+      return;
+    }
+    const channelHoist = hoistRaw === "top" || hoistRaw === "bottom"
+      ? hoistRaw
+      : existing.channelHoist;
 
     try {
       const record = await configs.upsert(
@@ -637,6 +648,7 @@ export function createSetupCommandService(options: {
           permissionSource,
           namingMode,
           sequenceNext: existing.sequenceNext,
+          channelHoist,
           moderatorRoleIds: [...existing.moderatorRoleIds],
         }),
       );
@@ -647,6 +659,7 @@ export function createSetupCommandService(options: {
         namingMode: record.namingMode,
         ownerCanEdit: record.ownerCanEdit,
         permissionSource: record.permissionSource,
+        channelHoist: record.channelHoist,
         userId: interaction.userId,
       });
       await finish(successResponse(CONFIG_SUCCESS_HEADLINE));

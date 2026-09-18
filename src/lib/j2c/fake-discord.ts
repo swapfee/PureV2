@@ -14,6 +14,7 @@ export interface FakeDiscordChannel {
   name: string;
   type?: number;
   parentId?: string;
+  position?: number;
   userLimit?: number;
   bitrate?: number;
   nsfw?: boolean;
@@ -223,6 +224,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         name: request.name,
         type: ChannelTypes.GuildVoice,
         parentId: request.parentId,
+        ...(request.position === undefined ? {} : { position: request.position }),
         ...(request.userLimit === undefined ? {} : { userLimit: request.userLimit }),
         guildId: request.guildId,
         permissionOverwrites: [],
@@ -281,6 +283,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
           id: channel.id,
           name: channel.name,
           ...(channel.type === undefined ? {} : { type: channel.type }),
+          ...(channel.position === undefined ? {} : { position: channel.position }),
           ...(channel.userLimit === undefined ? {} : { userLimit: channel.userLimit }),
           ...(channel.bitrate === undefined ? {} : { bitrate: channel.bitrate }),
           ...(channel.nsfw === undefined ? {} : { nsfw: channel.nsfw }),

@@ -111,6 +111,7 @@ describe("/setup command", () => {
     expect(saved?.ownerCanEdit).toBe(false);
     expect(saved?.permissionSource).toBe("category");
     expect(saved?.namingMode).toBe("template");
+    expect(saved?.channelHoist).toBe("bottom");
     expect(controls.overwriteCalls.some((call) => call.overwriteId === "123456789012345678")).toBe(
       true,
     );
@@ -143,6 +144,7 @@ describe("/setup command", () => {
               { name: "name", type: 3, value: "{username}'s room" },
               { name: "limit", type: 4, value: 8 },
               { name: "permission", type: 3, value: "lobby" },
+              { name: "hoist", type: 3, value: "top" },
             ],
           },
         ],
@@ -155,6 +157,7 @@ describe("/setup command", () => {
     expect(updated?.channelNameTemplate).toBe("{username}'s room");
     expect(updated?.defaultUserLimit).toBe(8);
     expect(updated?.permissionSource).toBe("lobby");
+    expect(updated?.channelHoist).toBe("top");
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
   });
 

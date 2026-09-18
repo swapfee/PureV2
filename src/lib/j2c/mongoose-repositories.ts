@@ -34,6 +34,7 @@ function toGuildRecord(doc: {
   permissionSource?: string | null;
   namingMode?: string | null;
   sequenceNext?: number | null;
+  channelHoist?: string | null;
   moderatorRoleIds: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -61,6 +62,7 @@ function toGuildRecord(doc: {
     namingMode,
     sequenceNext:
       typeof doc.sequenceNext === "number" && doc.sequenceNext >= 1 ? doc.sequenceNext : 1,
+    channelHoist: doc.channelHoist === "top" ? "top" : "bottom",
     moderatorRoleIds: [...doc.moderatorRoleIds],
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -177,6 +179,7 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
           permissionSource: validated.permissionSource ?? "category",
           namingMode: validated.namingMode ?? "template",
           sequenceNext: validated.sequenceNext ?? 1,
+          channelHoist: validated.channelHoist ?? "bottom",
           moderatorRoleIds: [...(validated.moderatorRoleIds ?? [])],
         });
         return { kind: "created", record: toGuildRecord(doc.toObject()) };
@@ -203,6 +206,7 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
         permissionSource: validated.permissionSource ?? "category",
         namingMode: validated.namingMode ?? "template",
         sequenceNext: validated.sequenceNext ?? 1,
+        channelHoist: validated.channelHoist ?? "bottom",
       };
       if (validated.errorLogChannelId !== undefined) {
         setFields.errorLogChannelId = validated.errorLogChannelId;

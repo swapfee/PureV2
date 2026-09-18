@@ -220,6 +220,26 @@ export function createCreationLifecycle(options: {
         ...(input.username === undefined ? {} : { username: input.username }),
       });
 
+      let channelPosition: number | undefined;
+      if (config.channelHoist === "top") {
+        const lobby = await options.discord.getChannel({ channelId: config.lobbyChannelId });
+        if (
+          lobby.kind === "found" &&
+          typeof lobby.value.position === "number" &&
+          Number.isInteger(lobby.value.position) &&
+          lobby.value.position >= 0
+        ) {
+          channelPosition = lobby.value.position + 1;
+        } else {
+          // Appending is the safe fallback: the room remains below the lobby.
+          options.logger.warn("Unable to resolve lobby position for top channel hoist", {
+            guildId: input.guildId,
+            channelId: config.lobbyChannelId,
+            outcome: lobby.kind,
+          });
+        }
+      }
+
       let channelId: string | undefined;
       let sequenceNumber: number | undefined;
       const maxAttempts =
@@ -243,8 +263,7 @@ export function createCreationLifecycle(options: {
           name: channelName,
           parentId: config.categoryId,
           ...(config.defaultUserLimit === undefined ? {} : { userLimit: config.defaultUserLimit }),
-          // Keep sequential rooms ordered under the category (lobby typically stays above).
-          ...(sequenceNumber === undefined ? {} : { position: sequenceNumber }),
+          ...(channelPosition === undefined ? {} : { position: channelPosition }),
           requestId: attemptRequestId,
           reason: "join-to-create",
         });

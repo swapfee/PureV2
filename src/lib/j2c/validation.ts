@@ -6,7 +6,9 @@ import {
 } from "../../models/index.ts";
 import {
   GUILD_NAMING_MODES,
+  GUILD_CHANNEL_HOISTS,
   GUILD_PERMISSION_SOURCES,
+  type GuildChannelHoist,
   type GuildNamingMode,
   type GuildPermissionSource,
 } from "../../models/guild-config.ts";
@@ -24,6 +26,10 @@ function isPermissionSource(value: string): value is GuildPermissionSource {
 
 function isNamingMode(value: string): value is GuildNamingMode {
   return (GUILD_NAMING_MODES as readonly string[]).includes(value);
+}
+
+function isChannelHoist(value: string): value is GuildChannelHoist {
+  return (GUILD_CHANNEL_HOISTS as readonly string[]).includes(value);
 }
 
 export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): UpsertGuildConfigInput {
@@ -71,6 +77,11 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
     throw new GuildConfigValidationError("sequenceNext must be an integer >= 1");
   }
 
+  const channelHoist = input.channelHoist ?? "bottom";
+  if (!isChannelHoist(channelHoist)) {
+    throw new GuildConfigValidationError("channelHoist must be top or bottom");
+  }
+
   const moderatorRoleIds = (input.moderatorRoleIds ?? []).map((value) => value.trim());
   if (moderatorRoleIds.some((value) => !isSnowflake(value))) {
     throw new GuildConfigValidationError("moderatorRoleIds must contain snowflakes");
@@ -91,6 +102,7 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
     permissionSource,
     namingMode,
     sequenceNext,
+    channelHoist,
     moderatorRoleIds,
   };
 }

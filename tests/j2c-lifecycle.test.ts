@@ -129,10 +129,46 @@ describe("creation lifecycle", () => {
     expect(outcome.kind).toBe("created");
     expect(controls.createCalls[0]?.name).toBe("Gaming 1");
     expect(controls.createCalls[0]?.userLimit).toBe(4);
-    expect(controls.createCalls[0]?.position).toBe(1);
+    expect(controls.createCalls[0]?.position).toBeUndefined();
     expect(controls.overwriteCalls.some((call) => call.overwriteId === memberId)).toBe(true);
     const stored = [...(await channels.listByGuild(guildId))];
     expect(stored[0]?.sequenceNumber).toBe(1);
+  });
+
+  test("top hoist creates the newest room immediately below the lobby", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "{username}'s channel",
+      channelHoist: "top",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.channels.set(lobbyId, {
+      id: lobbyId,
+      name: "Join to Create",
+      position: 7,
+      guildId,
+      permissionOverwrites: [],
+    });
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-top-hoist",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(controls.createCalls[0]?.position).toBe(8);
   });
 
   test("sequence naming gap-fills after a temporary channel is deleted", async () => {
@@ -183,7 +219,7 @@ describe("creation lifecycle", () => {
 
     expect(outcome.kind).toBe("created");
     expect(controls.createCalls[0]?.name).toBe("VC 2");
-    expect(controls.createCalls[0]?.position).toBe(2);
+    expect(controls.createCalls[0]?.position).toBeUndefined();
   });
 
   test("sequence naming retries when two joins race for the same number", async () => {
