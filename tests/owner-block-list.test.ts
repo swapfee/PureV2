@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ChannelTypes } from "discordeno";
 
 import { createCooldownStore } from "../src/handlers/cooldowns.ts";
+import blockFromVcCommand from "../src/commands/block-from-vc.command.ts";
 import {
   BLOCK_LIST_BUTTON_PREFIX,
   blockUser,
@@ -67,6 +68,32 @@ function vcInteraction(
     ...(partial.targetUserId ? { targetUserId: partial.targetUserId } : {}),
   };
 }
+
+describe("block context menu", () => {
+  test("does not forward the Discord bot itself to the block list", async () => {
+    const { discord, controls } = createFakeDiscord();
+    let forwarded = false;
+
+    await blockFromVcCommand.execute(
+      {
+        workerId: 0,
+        logger: testLogger(),
+        discord,
+        vc: {
+          async execute() {
+            forwarded = true;
+          },
+        },
+      },
+      vcInteraction({ targetUserId: botId }),
+    );
+
+    expect(forwarded).toBe(false);
+    expect(embedText(controls.responses.at(-1))).toContain(
+      "cannot add this bot to your block list",
+    );
+  });
+});
 
 function panelInteraction(
   partial: Partial<InteractionCreatePayload> & Pick<InteractionCreatePayload, "customId">,

@@ -34,6 +34,15 @@ const blockFromVcCommand: CommandModule = {
       });
       return;
     }
+    if (interaction.targetUserId === interaction.applicationId) {
+      await context.discord.respondToInteraction({
+        interactionId: interaction.id,
+        interactionToken: interaction.token,
+        embeds: failureResponse("You cannot add this bot to your block list.").embeds,
+        ephemeral: true,
+      });
+      return;
+    }
     await context.vc.execute({
       ...interaction,
       commandName: "vc",

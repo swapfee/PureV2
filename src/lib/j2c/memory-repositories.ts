@@ -22,6 +22,9 @@ function cloneGuild(record: GuildConfigRecord): GuildConfigRecord {
     ...(record.errorLogChannelId === undefined
       ? {}
       : { errorLogChannelId: record.errorLogChannelId }),
+    ...(record.interfaceChannelId === undefined
+      ? {}
+      : { interfaceChannelId: record.interfaceChannelId }),
     moderatorRoleIds: [...record.moderatorRoleIds],
     createdAt: new Date(record.createdAt),
     updatedAt: new Date(record.updatedAt),
@@ -64,6 +67,9 @@ function buildGuildConfigRecord(
     ...(validated.errorLogChannelId === undefined
       ? {}
       : { errorLogChannelId: validated.errorLogChannelId }),
+    ...(validated.interfaceChannelId === undefined
+      ? {}
+      : { interfaceChannelId: validated.interfaceChannelId }),
     channelNameTemplate: validated.channelNameTemplate,
     ...(validated.defaultUserLimit === undefined ? {} : { defaultUserLimit: validated.defaultUserLimit }),
     ownerCanEdit: validated.ownerCanEdit ?? false,

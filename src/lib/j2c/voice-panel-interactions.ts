@@ -10,6 +10,7 @@ import {
   buildLimitModal,
   buildRenameModal,
   buildTransferSelect,
+  GLOBAL_VOICE_PANEL_PREFIX,
   parseColonId,
   VOICE_DELETE_PREFIX,
   VOICE_MODAL_PREFIX,
@@ -145,6 +146,7 @@ async function requireManagedConnected(options: {
   readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly channelId: string;
+  readonly allowExternalPanel?: boolean;
 }): Promise<
   | { readonly ok: true; readonly record: NonNullable<Awaited<ReturnType<TemporaryChannelRepository["findByChannelId"]>>> }
   | { readonly ok: false; readonly reason: string }
@@ -163,7 +165,7 @@ async function requireManagedConnected(options: {
   const currentVoiceChannelId =
     voice.kind === "found" ? voice.value.channelId : undefined;
 
-  if (interaction.channelId !== channelId) {
+  if (!options.allowExternalPanel && interaction.channelId !== channelId) {
     return {
       ok: false,
       reason: await panelAccessDeniedReason({
@@ -228,6 +230,7 @@ export function createVoicePanelInteractionHandler(options: {
         customId.startsWith(`${VOICE_MODAL_PREFIX}:`) ||
         customId.startsWith(`${VOICE_SELECT_PREFIX}:`) ||
         customId.startsWith(`${VOICE_DELETE_PREFIX}:`) ||
+        customId.startsWith(`${GLOBAL_VOICE_PANEL_PREFIX}:`) ||
         customId.startsWith(`${BLOCK_LIST_BUTTON_PREFIX}:`) ||
         customId.startsWith(`${VC_JOIN_REQUEST_PREFIX}:`)
       );
@@ -240,6 +243,20 @@ export function createVoicePanelInteractionHandler(options: {
       const replyState: InteractionReplyState = { deferred: false, answered: false };
 
       try {
+        if (parts[0] === GLOBAL_VOICE_PANEL_PREFIX) {
+          await handleGlobalPanelButton({
+            interaction,
+            parts,
+            channels,
+            ...(configs ? { configs } : {}),
+            ...(blocks ? { blocks } : {}),
+            discord,
+            logger,
+            botUsername,
+            replyState,
+          });
+          return;
+        }
         if (parts[0] === VC_JOIN_REQUEST_PREFIX) {
           await handleJoinRequestButton({
             interaction,
@@ -319,6 +336,82 @@ export function createVoicePanelInteractionHandler(options: {
   };
 }
 
+async function handleGlobalPanelButton(input: {
+  readonly interaction: InteractionCreatePayload;
+  readonly parts: readonly string[];
+  readonly channels: TemporaryChannelRepository;
+  readonly configs?: GuildConfigRepository;
+  readonly blocks?: OwnerBlockListRepository;
+  readonly discord: DiscordApiPort;
+  readonly logger: Logger;
+  readonly botUsername: string;
+  readonly replyState: InteractionReplyState;
+}): Promise<void> {
+  const [, action, extra] = input.parts;
+  if (!action || extra || !isVoicePanelAction(action)) return;
+
+  const guildId = input.interaction.guildId;
+  if (!guildId || !input.interaction.channelId || !input.configs) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse("This interface is unavailable."),
+    );
+    return;
+  }
+
+  const config = await input.configs.findByGuildId(guildId);
+  if (config?.interfaceChannelId !== input.interaction.channelId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse("This interface is no longer active."),
+    );
+    return;
+  }
+
+  const voice = await input.discord.getUserVoiceChannel({
+    guildId,
+    userId: input.interaction.userId,
+  });
+  const channelId = voice.kind === "found" ? voice.value.channelId : null;
+  if (!channelId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse(PANEL_NOT_IN_MANAGED_MESSAGE),
+    );
+    return;
+  }
+
+  const record = await input.channels.findByChannelId(channelId);
+  if (!record || record.status !== "active" || record.guildId !== guildId) {
+    await replyEphemeral(
+      input.discord,
+      input.interaction,
+      input.replyState,
+      failureResponse(PANEL_NOT_IN_MANAGED_MESSAGE),
+    );
+    return;
+  }
+
+  await handlePanelButton({
+    interaction: input.interaction,
+    parts: [VOICE_PANEL_PREFIX, action, record.channelId, record.ownerId],
+    channels: input.channels,
+    configs: input.configs,
+    ...(input.blocks ? { blocks: input.blocks } : {}),
+    discord: input.discord,
+    logger: input.logger,
+    botUsername: input.botUsername,
+    replyState: input.replyState,
+    allowExternalPanel: true,
+  });
+}
+
 async function handlePanelButton(input: {
   readonly interaction: InteractionCreatePayload;
   readonly parts: readonly string[];
@@ -329,6 +422,7 @@ async function handlePanelButton(input: {
   readonly logger: Logger;
   readonly botUsername: string;
   readonly replyState: InteractionReplyState;
+  readonly allowExternalPanel?: boolean;
 }): Promise<void> {
   const [, actionRaw, channelId, embeddedOwnerId, extra] = input.parts;
   if (!actionRaw || !channelId || !embeddedOwnerId || extra || !isVoicePanelAction(actionRaw)) {
@@ -342,6 +436,7 @@ async function handlePanelButton(input: {
       channels: input.channels,
       discord: input.discord,
       channelId,
+      ...(input.allowExternalPanel ? { allowExternalPanel: true } : {}),
     });
     if (!access.ok) {
       await replyEphemeral(
@@ -361,7 +456,9 @@ async function handlePanelButton(input: {
       );
       return;
     }
-    const modal = action === "rename" ? buildRenameModal(channelId) : buildLimitModal(channelId);
+    const modal = action === "rename"
+      ? buildRenameModal(channelId, input.allowExternalPanel)
+      : buildLimitModal(channelId, input.allowExternalPanel);
     await input.discord.showModal({
       interactionId: input.interaction.id,
       interactionToken: input.interaction.token,
@@ -380,6 +477,7 @@ async function handlePanelButton(input: {
     channels: input.channels,
     discord: input.discord,
     channelId,
+    ...(input.allowExternalPanel ? { allowExternalPanel: true } : {}),
   });
   if (!access.ok) {
     await replyEphemeral(
@@ -554,7 +652,7 @@ async function handlePanelButton(input: {
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
       content: "Select the member who should become the new owner.",
-      components: [...buildTransferSelect(channelId)],
+      components: [...buildTransferSelect(channelId, input.allowExternalPanel)],
     });
     input.replyState.answered = true;
     return;
@@ -651,7 +749,7 @@ async function handlePanelButton(input: {
           description: `${ACTION_EMOJIS.error} Are you sure you want to delete this voice channel?`,
         },
       ],
-      components: [...buildDeleteConfirmation(channelId)],
+      components: [...buildDeleteConfirmation(channelId, input.allowExternalPanel)],
     });
     input.replyState.answered = true;
   }
@@ -665,8 +763,9 @@ async function handleModalSubmit(input: {
   readonly logger: Logger;
   readonly replyState: InteractionReplyState;
 }): Promise<void> {
-  const [, action, channelId, extra] = input.parts;
-  if (!action || !channelId || extra) return;
+  const [, action, channelId, source, extra] = input.parts;
+  if (!action || !channelId || extra || (source !== undefined && source !== "global")) return;
+  const allowExternalPanel = source === "global";
 
   await deferEphemeral(input.discord, input.interaction, input.replyState);
 
@@ -675,6 +774,7 @@ async function handleModalSubmit(input: {
     channels: input.channels,
     discord: input.discord,
     channelId,
+    ...(allowExternalPanel ? { allowExternalPanel: true } : {}),
   });
   if (!access.ok) {
     await replyEphemeral(
@@ -811,8 +911,14 @@ async function handleTransferSelect(input: {
   readonly botUsername: string;
   readonly replyState: InteractionReplyState;
 }): Promise<void> {
-  const [, action, channelId, extra] = input.parts;
-  if (action !== "transfer" || !channelId || extra) return;
+  const [, action, channelId, source, extra] = input.parts;
+  if (
+    action !== "transfer" ||
+    !channelId ||
+    extra ||
+    (source !== undefined && source !== "global")
+  ) return;
+  const allowExternalPanel = source === "global";
 
   await deferUpdate(input.discord, input.interaction, input.replyState);
 
@@ -821,6 +927,7 @@ async function handleTransferSelect(input: {
     channels: input.channels,
     discord: input.discord,
     channelId,
+    ...(allowExternalPanel ? { allowExternalPanel: true } : {}),
   });
   if (!access.ok || access.record.ownerId !== input.interaction.userId) {
     await input.discord.editInteractionResponse({
@@ -1182,8 +1289,9 @@ async function handleDeleteConfirm(input: {
   readonly logger: Logger;
   readonly replyState: InteractionReplyState;
 }): Promise<void> {
-  const [, choice, channelId, extra] = input.parts;
-  if (!choice || !channelId || extra) return;
+  const [, choice, channelId, source, extra] = input.parts;
+  if (!choice || !channelId || extra || (source !== undefined && source !== "global")) return;
+  const allowExternalPanel = source === "global";
 
   await deferUpdate(input.discord, input.interaction, input.replyState);
 
@@ -1192,6 +1300,7 @@ async function handleDeleteConfirm(input: {
     channels: input.channels,
     discord: input.discord,
     channelId,
+    ...(allowExternalPanel ? { allowExternalPanel: true } : {}),
   });
   if (!access.ok || access.record.ownerId !== input.interaction.userId) {
     await input.discord.editInteractionResponse({
@@ -1238,6 +1347,16 @@ async function handleDeleteConfirm(input: {
     return;
   }
   await input.channels.remove(channelId);
+  if (allowExternalPanel) {
+    await input.discord.editInteractionResponse({
+      applicationId: input.interaction.applicationId,
+      interactionToken: input.interaction.token,
+      embeds: successResponse("Channel deleted.").embeds,
+      components: [],
+    });
+    input.replyState.answered = true;
+    return;
+  }
   // Channel (and this confirmation message) are gone — do not edit the interaction.
   input.replyState.answered = true;
 }

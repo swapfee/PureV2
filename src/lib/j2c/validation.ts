@@ -35,6 +35,9 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
   if (input.errorLogChannelId !== undefined && !isSnowflake(input.errorLogChannelId)) {
     throw new GuildConfigValidationError("errorLogChannelId must be a snowflake");
   }
+  if (input.interfaceChannelId !== undefined && !isSnowflake(input.interfaceChannelId)) {
+    throw new GuildConfigValidationError("interfaceChannelId must be a snowflake");
+  }
 
   const channelNameTemplate = input.channelNameTemplate.trim();
   if (
@@ -79,6 +82,9 @@ export function validateUpsertGuildConfigInput(input: UpsertGuildConfigInput): U
     lobbyChannelId: input.lobbyChannelId,
     categoryId: input.categoryId,
     ...(input.errorLogChannelId === undefined ? {} : { errorLogChannelId: input.errorLogChannelId }),
+    ...(input.interfaceChannelId === undefined
+      ? {}
+      : { interfaceChannelId: input.interfaceChannelId }),
     channelNameTemplate: channelNameTemplate.length > 0 ? channelNameTemplate : DEFAULT_CHANNEL_NAME_TEMPLATE,
     ...(input.defaultUserLimit === undefined ? {} : { defaultUserLimit: input.defaultUserLimit }),
     ownerCanEdit,

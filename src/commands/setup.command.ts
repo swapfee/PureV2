@@ -68,6 +68,19 @@ const setupCommandData: CreateApplicationCommand = {
         },
       ],
     },
+    {
+      type: ApplicationCommandOptionTypes.SubCommand,
+      name: "interface",
+      description: "Enable or disable the shared voice-control interface",
+      options: [
+        {
+          type: ApplicationCommandOptionTypes.Boolean,
+          name: "enabled",
+          description: "Create or remove the shared voice-control interface",
+          required: true,
+        },
+      ],
+    },
   ],
 };
 

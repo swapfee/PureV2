@@ -33,6 +33,13 @@ const guildConfigSchema = new Schema(
       trim: true,
       match: SNOWFLAKE_PATTERN,
     },
+    /** Optional shared text-channel interface for managed temporary voice channels. */
+    interfaceChannelId: {
+      type: String,
+      required: false,
+      trim: true,
+      match: SNOWFLAKE_PATTERN,
+    },
     channelNameTemplate: {
       type: String,
       required: true,
@@ -112,6 +119,7 @@ export interface GuildConfigRecord {
   readonly lobbyChannelId: string;
   readonly categoryId: string;
   readonly errorLogChannelId?: string;
+  readonly interfaceChannelId?: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
   readonly ownerCanEdit: boolean;
@@ -129,6 +137,7 @@ export interface UpsertGuildConfigInput {
   readonly lobbyChannelId: string;
   readonly categoryId: string;
   readonly errorLogChannelId?: string;
+  readonly interfaceChannelId?: string;
   readonly channelNameTemplate: string;
   readonly defaultUserLimit?: number;
   readonly ownerCanEdit?: boolean;

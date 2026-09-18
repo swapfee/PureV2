@@ -129,6 +129,21 @@ export async function runFactoryReset(options: {
     }
   }
 
+  if (config.interfaceChannelId) {
+    const interfaceDelete = await options.discord.deleteChannel({
+      channelId: config.interfaceChannelId,
+      requestId: `setup-reset:${options.interactionId}:interface`,
+      reason,
+    });
+    if (interfaceDelete.kind !== "ok" && interfaceDelete.kind !== "missing") {
+      options.logger.warn("Factory reset failed to delete interface channel", {
+        guildId: options.guildId,
+        channelId: config.interfaceChannelId,
+        outcome: interfaceDelete.kind,
+      });
+    }
+  }
+
   let deletedCategory = false;
   let keptCategory = false;
   let renamedCategory = false;

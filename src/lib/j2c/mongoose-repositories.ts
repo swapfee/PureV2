@@ -27,6 +27,7 @@ function toGuildRecord(doc: {
   lobbyChannelId: string;
   categoryId: string;
   errorLogChannelId?: string | null;
+  interfaceChannelId?: string | null;
   channelNameTemplate: string;
   defaultUserLimit?: number | null;
   ownerCanEdit?: boolean | null;
@@ -47,6 +48,9 @@ function toGuildRecord(doc: {
     categoryId: doc.categoryId,
     ...(doc.errorLogChannelId && typeof doc.errorLogChannelId === "string"
       ? { errorLogChannelId: doc.errorLogChannelId }
+      : {}),
+    ...(doc.interfaceChannelId && typeof doc.interfaceChannelId === "string"
+      ? { interfaceChannelId: doc.interfaceChannelId }
       : {}),
     channelNameTemplate: doc.channelNameTemplate,
     ...(doc.defaultUserLimit === undefined || doc.defaultUserLimit === null
@@ -160,6 +164,9 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
           ...(validated.errorLogChannelId === undefined
             ? {}
             : { errorLogChannelId: validated.errorLogChannelId }),
+          ...(validated.interfaceChannelId === undefined
+            ? {}
+            : { interfaceChannelId: validated.interfaceChannelId }),
           channelNameTemplate: validated.channelNameTemplate,
           ...(validated.defaultUserLimit === undefined
             ? {}
@@ -198,24 +205,18 @@ export function createMongooseGuildConfigRepository(): GuildConfigRepository {
       if (validated.errorLogChannelId !== undefined) {
         setFields.errorLogChannelId = validated.errorLogChannelId;
       }
-      const update =
-        validated.defaultUserLimit === undefined
-          ? {
-              $set: setFields,
-              $unset: {
-                defaultUserLimit: 1,
-                ...(validated.errorLogChannelId === undefined ? { errorLogChannelId: 1 } : {}),
-              },
-            }
-          : {
-              $set: {
-                ...setFields,
-                defaultUserLimit: validated.defaultUserLimit,
-              },
-              ...(validated.errorLogChannelId === undefined
-                ? { $unset: { errorLogChannelId: 1 } }
-                : {}),
-            };
+      if (validated.interfaceChannelId !== undefined) {
+        setFields.interfaceChannelId = validated.interfaceChannelId;
+      }
+      const unsetFields: Record<string, 1> = {};
+      if (validated.defaultUserLimit === undefined) unsetFields.defaultUserLimit = 1;
+      else setFields.defaultUserLimit = validated.defaultUserLimit;
+      if (validated.errorLogChannelId === undefined) unsetFields.errorLogChannelId = 1;
+      if (validated.interfaceChannelId === undefined) unsetFields.interfaceChannelId = 1;
+      const update = {
+        $set: setFields,
+        ...(Object.keys(unsetFields).length === 0 ? {} : { $unset: unsetFields }),
+      };
       const doc = await GuildConfigModel.findOneAndUpdate({ guildId: validated.guildId }, update, {
         upsert: true,
         returnDocument: "after",

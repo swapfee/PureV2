@@ -1,6 +1,10 @@
 import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
 
-import type { GuildPermissionSource } from "../../models/guild-config.ts";
+import type {
+  GuildConfigRecord,
+  GuildPermissionSource,
+  UpsertGuildConfigInput,
+} from "../../models/guild-config.ts";
 import { DEFAULT_CHANNEL_NAME_TEMPLATE } from "../../models/snowflake.ts";
 import type { Logger } from "../logger.ts";
 import type {
@@ -17,6 +21,7 @@ import { runFactoryReset } from "./factory-reset.ts";
 import {
   DEFAULT_SETUP_CATEGORY_NAME,
   DEFAULT_SETUP_ERROR_LOG_NAME,
+  DEFAULT_SETUP_INTERFACE_NAME,
   DEFAULT_SETUP_LOBBY_NAME,
   normalizeSetupChannelName,
 } from "./setup-channel-names.ts";
@@ -28,17 +33,23 @@ import type {
   TemporaryChannelRepository,
 } from "./repositories.ts";
 import type { VoiceOccupancyTracker } from "./voice-occupancy.ts";
+import {
+  buildGlobalVoiceControlPanelComponents,
+  IS_COMPONENTS_V2,
+} from "./voice-panel.ts";
 
 const MANAGE_GUILD = BitwisePermissionFlags.MANAGE_GUILD;
 const ADMINISTRATOR = BitwisePermissionFlags.ADMINISTRATOR;
 
 const SETUP_SUCCESS_HEADLINE = "Setup Complete";
 const CONFIG_SUCCESS_HEADLINE = "Setup Updated";
+const INTERFACE_ENABLED_HEADLINE = "Voice Interface Enabled";
+const INTERFACE_DISABLED_HEADLINE = "Voice Interface Disabled";
 const RESET_SUCCESS_HEADLINE = "Factory Reset Complete";
 const ALREADY_CONFIGURED_MESSAGE =
   "This server already has a Join to Create system. Use `/setup config` to change settings, or `/reset` before creating a new one";
 
-type SetupSubcommand = "create" | "config" | "reset";
+type SetupSubcommand = "create" | "config" | "interface" | "reset";
 
 function optionValue(
   options: readonly InteractionOption[] | undefined,
@@ -63,7 +74,12 @@ function resolveSubcommand(
     // Bare `/setup` (no subcommand payload) → automatic create.
     return { name: "create", options: [] };
   }
-  if (root.name === "config" || root.name === "create" || root.name === "reset") {
+  if (
+    root.name === "config" ||
+    root.name === "create" ||
+    root.name === "interface" ||
+    root.name === "reset"
+  ) {
     return { name: root.name, options: root.options ?? [] };
   }
   // Legacy aliases from the removed automatic/default/sequence modes.
@@ -100,6 +116,29 @@ function createFailureMessage(
 
 function parsePermissionSource(raw: string | number | boolean | undefined): GuildPermissionSource {
   return raw === "lobby" ? "lobby" : "category";
+}
+
+function configInputWithInterface(
+  record: GuildConfigRecord,
+  interfaceChannelId?: string,
+): UpsertGuildConfigInput {
+  return {
+    guildId: record.guildId,
+    enabled: record.enabled,
+    lobbyChannelId: record.lobbyChannelId,
+    categoryId: record.categoryId,
+    ...(record.errorLogChannelId ? { errorLogChannelId: record.errorLogChannelId } : {}),
+    ...(interfaceChannelId ? { interfaceChannelId } : {}),
+    channelNameTemplate: record.channelNameTemplate,
+    ...(record.defaultUserLimit === undefined
+      ? {}
+      : { defaultUserLimit: record.defaultUserLimit }),
+    ownerCanEdit: record.ownerCanEdit,
+    permissionSource: record.permissionSource,
+    namingMode: record.namingMode,
+    sequenceNext: record.sequenceNext,
+    moderatorRoleIds: [...record.moderatorRoleIds],
+  };
 }
 
 export interface SetupCommandService {
@@ -147,8 +186,13 @@ export function createSetupCommandService(options: {
 
       const sub = resolveSubcommand(interaction.commandName, interaction.options);
       const isReset = interaction.commandName === "reset" || sub.name === "reset";
-      if (!isReset && sub.name !== "create" && sub.name !== "config") {
-        await reply(failureResponse("Use `/setup` or `/setup config`."));
+      if (
+        !isReset &&
+        sub.name !== "create" &&
+        sub.name !== "config" &&
+        sub.name !== "interface"
+      ) {
+        await reply(failureResponse("Use `/setup`, `/setup config`, or `/setup interface`."));
         return;
       }
 
@@ -194,6 +238,17 @@ export function createSetupCommandService(options: {
 
       if (sub.name === "config") {
         await handleConfig({
+          interaction,
+          guildId,
+          subOptions: sub.options,
+          existing,
+          finish,
+        });
+        return;
+      }
+
+      if (sub.name === "interface") {
+        await handleInterface({
           interaction,
           guildId,
           subOptions: sub.options,
@@ -368,6 +423,137 @@ export function createSetupCommandService(options: {
     }
   }
 
+  async function handleInterface(input: {
+    readonly interaction: InteractionCreatePayload;
+    readonly guildId: string;
+    readonly subOptions: readonly InteractionOption[];
+    readonly existing: Awaited<ReturnType<GuildConfigRepository["findByGuildId"]>>;
+    readonly finish: (message: ActionMessage) => Promise<void>;
+  }): Promise<void> {
+    const { interaction, guildId, subOptions, existing, finish } = input;
+    if (!existing) {
+      await finish(failureResponse("Join to Create System is not configured in this server."));
+      return;
+    }
+
+    const enabled = optionValue(subOptions, "enabled");
+    if (typeof enabled !== "boolean") {
+      await finish(failureResponse("Specify whether the voice interface should be enabled."));
+      return;
+    }
+
+    const requestId = `setup:${interaction.id}:interface`;
+    const reason = "PureV2 shared voice interface";
+
+    if (!enabled) {
+      if (!existing.interfaceChannelId) {
+        await finish(successResponse(INTERFACE_DISABLED_HEADLINE));
+        return;
+      }
+
+      const deleted = await discord.deleteChannel({
+        channelId: existing.interfaceChannelId,
+        requestId,
+        reason,
+      });
+      if (deleted.kind !== "ok" && deleted.kind !== "missing") {
+        await finish(createFailureMessage(deleted, "remove the voice-interface channel"));
+        return;
+      }
+
+      try {
+        await configs.upsert(
+          validateUpsertGuildConfigInput(configInputWithInterface(existing)),
+        );
+        logger.info("Guild shared voice interface disabled", {
+          guildId,
+          channelId: existing.interfaceChannelId,
+          userId: interaction.userId,
+        });
+        await finish(successResponse(INTERFACE_DISABLED_HEADLINE));
+      } catch (error: unknown) {
+        logger.error("Failed to clear shared voice interface config", {
+          guildId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await finish(failureResponse("The channel was removed, but its setting could not be cleared. Retry the command."));
+      }
+      return;
+    }
+
+    if (existing.interfaceChannelId) {
+      const current = await discord.getChannel({ channelId: existing.interfaceChannelId });
+      if (current.kind === "found") {
+        await finish(successResponse(INTERFACE_ENABLED_HEADLINE));
+        return;
+      }
+      if (current.kind !== "missing") {
+        await finish(createFailureMessage(current, "check the existing voice-interface channel"));
+        return;
+      }
+    }
+
+    const created = await discord.createGuildChannel({
+      guildId,
+      name: DEFAULT_SETUP_INTERFACE_NAME,
+      type: ChannelTypes.GuildText,
+      parentId: existing.categoryId,
+      requestId,
+      reason,
+    });
+    if (created.kind !== "found") {
+      await finish(createFailureMessage(created, "create the voice-interface channel"));
+      return;
+    }
+    const interfaceChannelId = created.value.id;
+
+    const botUser = await discord.getCurrentUser();
+    const components = buildGlobalVoiceControlPanelComponents({
+      botUsername: botUser.kind === "found" ? botUser.value.username : "PureV2",
+    });
+    const sent = await discord.sendChannelMessage({
+      channelId: interfaceChannelId,
+      requestId: `${requestId}:panel`,
+      components,
+      flags: IS_COMPONENTS_V2,
+    });
+    if (sent.kind !== "found") {
+      await discord.deleteChannel({
+        channelId: interfaceChannelId,
+        requestId: `${requestId}:compensate`,
+        reason,
+      });
+      await finish(createFailureMessage(sent, "post the global voice panel"));
+      return;
+    }
+
+    try {
+      await configs.upsert(
+        validateUpsertGuildConfigInput(
+          configInputWithInterface(existing, interfaceChannelId),
+        ),
+      );
+      logger.info("Guild shared voice interface enabled", {
+        guildId,
+        channelId: interfaceChannelId,
+        messageId: sent.value.id,
+        userId: interaction.userId,
+      });
+      await finish(successResponse(INTERFACE_ENABLED_HEADLINE));
+    } catch (error: unknown) {
+      await discord.deleteChannel({
+        channelId: interfaceChannelId,
+        requestId: `${requestId}:compensate`,
+        reason,
+      });
+      logger.error("Failed to save shared voice interface config", {
+        guildId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await finish(failureResponse("Unable to save the voice-interface setting. Please try again."));
+    }
+  }
+
   async function handleConfig(input: {
     readonly interaction: InteractionCreatePayload;
     readonly guildId: string;
@@ -442,6 +628,9 @@ export function createSetupCommandService(options: {
           ...(existing.errorLogChannelId === undefined
             ? {}
             : { errorLogChannelId: existing.errorLogChannelId }),
+          ...(existing.interfaceChannelId === undefined
+            ? {}
+            : { interfaceChannelId: existing.interfaceChannelId }),
           channelNameTemplate,
           ...(defaultUserLimit === undefined ? {} : { defaultUserLimit }),
           ownerCanEdit,

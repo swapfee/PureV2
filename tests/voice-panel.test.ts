@@ -7,7 +7,9 @@ import { createMemoryTemporaryChannelRepository } from "../src/lib/j2c/memory-re
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 import {
+  buildGlobalVoiceControlPanelComponents,
   buildVoiceControlPanelComponents,
+  GLOBAL_VOICE_PANEL_PREFIX,
   IS_COMPONENTS_V2,
   PANEL_EMOJIS,
   VOICE_PANEL_PREFIX,
@@ -33,6 +35,7 @@ const channelId = "777777777777777777";
 const lobbyId = "222222222222222222";
 const categoryId = "333333333333333333";
 const botId = "111111111111111111";
+const interfaceChannelId = "666666666666666666";
 
 function testLogger() {
   return createLogger({ service: "purev2", role: "test", level: "error", write: () => undefined });
@@ -102,6 +105,16 @@ describe("voice panel builder", () => {
         "string",
       );
     }
+  });
+
+  test("builds a channel-agnostic global interface", () => {
+    const components = buildGlobalVoiceControlPanelComponents({ botUsername: "Pure" });
+    expect(components).toHaveLength(1);
+    const serialized = JSON.stringify(components);
+    expect(serialized).toContain("Pure's Global Interface");
+    expect(serialized).toContain(`${GLOBAL_VOICE_PANEL_PREFIX}:lock`);
+    expect(serialized).not.toContain(channelId);
+    expect(serialized).not.toContain(ownerId);
   });
 });
 
@@ -204,6 +217,93 @@ describe("voice panel install", () => {
 });
 
 describe("voice panel interactions", () => {
+  test("global interface resolves the caller's managed VC and carries context into modals", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    const configs = createMemoryGuildConfigRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "global-panel-reservation",
+      creationRequestId: "global-panel-create",
+      occupantIds: [ownerId, memberId],
+    });
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      interfaceChannelId,
+      channelNameTemplate: "{username}'s channel",
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "owner-room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+        [
+          interfaceChannelId,
+          {
+            id: interfaceChannelId,
+            name: "voice-interface",
+            type: ChannelTypes.GuildText,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+    controls.voiceByUser.set(`${guildId}:${memberId}`, channelId);
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      configs,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        channelId: interfaceChannelId,
+        customId: `${GLOBAL_VOICE_PANEL_PREFIX}:rename`,
+      }),
+    );
+    expect(controls.modals.at(-1)?.customId).toBe(`voice-modal:rename:${channelId}:global`);
+
+    await handler.execute(
+      interaction({
+        id: "500000000000000002",
+        channelId: interfaceChannelId,
+        customId: `voice-modal:rename:${channelId}:global`,
+        componentValues: { value: "Renamed globally" },
+      }),
+    );
+    expect(controls.editCalls.at(-1)?.channelId).toBe(channelId);
+    expect(controls.editCalls.at(-1)?.name).toBe("Renamed globally");
+
+    await handler.execute(
+      interaction({
+        id: "500000000000000003",
+        userId: memberId,
+        channelId: interfaceChannelId,
+        customId: `${GLOBAL_VOICE_PANEL_PREFIX}:info`,
+      }),
+    );
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      `<@${ownerId}>`,
+    );
+  });
+
   test("rejects owner-only actions for non-owners", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({

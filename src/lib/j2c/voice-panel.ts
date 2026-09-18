@@ -22,6 +22,7 @@ export const VOICE_PANEL_PREFIX = "voice-panel";
 export const VOICE_MODAL_PREFIX = "voice-modal";
 export const VOICE_SELECT_PREFIX = "voice-select";
 export const VOICE_DELETE_PREFIX = "voice-delete";
+export const GLOBAL_VOICE_PANEL_PREFIX = "voice-global";
 export const VOICE_PANEL_VERSION = 3;
 export const IS_COMPONENTS_V2 = 1 << 15;
 
@@ -78,6 +79,18 @@ function panelButton(action: VoicePanelAction, channelId: string, ownerId: strin
     type: ComponentTypes.Button,
     style: ButtonStyles.Secondary,
     custom_id: `${VOICE_PANEL_PREFIX}:${action}:${channelId}:${ownerId}`,
+    emoji: { id: emoji.id, name: emoji.name },
+  };
+}
+
+function globalPanelButton(action: VoicePanelAction, emoji: {
+  readonly name: string;
+  readonly id: string;
+}) {
+  return {
+    type: ComponentTypes.Button,
+    style: ButtonStyles.Secondary,
+    custom_id: `${GLOBAL_VOICE_PANEL_PREFIX}:${action}`,
     emoji: { id: emoji.id, name: emoji.name },
   };
 }
@@ -141,14 +154,71 @@ export function buildVoiceControlPanelComponents(options: {
   ];
 }
 
-export function buildRenameModal(channelId: string): {
+/** Shared panel whose buttons resolve the caller's current managed VC at click time. */
+export function buildGlobalVoiceControlPanelComponents(options: {
+  readonly botUsername: string;
+}): unknown[] {
+  const heading = {
+    type: ComponentTypes.TextDisplay,
+    content: `# ${options.botUsername}'s Global Interface\nManage the temporary voice channel you are currently connected to.`,
+  };
+  const separator = {
+    type: ComponentTypes.Separator,
+    divider: true,
+    spacing: 1,
+  };
+  const commandList = {
+    type: ComponentTypes.TextDisplay,
+    content: [
+      `${emojiMention(PANEL_EMOJIS.lock)} **Lock** â€” Prevent members from joining`,
+      `${emojiMention(PANEL_EMOJIS.unlock)} **Unlock** â€” Restore inherited access`,
+      `${emojiMention(PANEL_EMOJIS.hide)} **Hide** â€” Hide the channel from everyone`,
+      `${emojiMention(PANEL_EMOJIS.unhide)} **Unhide** â€” Restore inherited visibility`,
+      `${emojiMention(PANEL_EMOJIS.rename)} **Rename** â€” Change the channel name`,
+      `${emojiMention(PANEL_EMOJIS.limit)} **Limit** â€” Set the user limit`,
+      `${emojiMention(PANEL_EMOJIS.transfer)} **Transfer** â€” Transfer channel ownership`,
+      `${emojiMention(PANEL_EMOJIS.claim)} **Claim** â€” Claim an ownerless channel`,
+      `${emojiMention(PANEL_EMOJIS.info)} **Info** â€” View the current channel settings`,
+      `${emojiMention(PANEL_EMOJIS.delete)} **Delete** â€” Delete the temporary channel`,
+    ].join("\n"),
+  };
+  const row1 = {
+    type: ComponentTypes.ActionRow,
+    components: [
+      globalPanelButton("lock", PANEL_EMOJIS.lock),
+      globalPanelButton("hide", PANEL_EMOJIS.hide),
+      globalPanelButton("rename", PANEL_EMOJIS.rename),
+      globalPanelButton("transfer", PANEL_EMOJIS.transfer),
+      globalPanelButton("info", PANEL_EMOJIS.info),
+    ],
+  };
+  const row2 = {
+    type: ComponentTypes.ActionRow,
+    components: [
+      globalPanelButton("unlock", PANEL_EMOJIS.unlock),
+      globalPanelButton("unhide", PANEL_EMOJIS.unhide),
+      globalPanelButton("limit", PANEL_EMOJIS.limit),
+      globalPanelButton("claim", PANEL_EMOJIS.claim),
+      globalPanelButton("delete", PANEL_EMOJIS.delete),
+    ],
+  };
+
+  return [
+    {
+      type: ComponentTypes.Container,
+      components: [heading, separator, commandList, separator, row1, row2],
+    },
+  ];
+}
+
+export function buildRenameModal(channelId: string, global = false): {
   readonly title: string;
   readonly customId: string;
   readonly components: readonly unknown[];
 } {
   return {
     title: "Rename Voice Channel",
-    customId: `${VOICE_MODAL_PREFIX}:rename:${channelId}`,
+    customId: `${VOICE_MODAL_PREFIX}:rename:${channelId}${global ? ":global" : ""}`,
     components: [
       {
         type: ComponentTypes.ActionRow,
@@ -169,14 +239,14 @@ export function buildRenameModal(channelId: string): {
   };
 }
 
-export function buildLimitModal(channelId: string): {
+export function buildLimitModal(channelId: string, global = false): {
   readonly title: string;
   readonly customId: string;
   readonly components: readonly unknown[];
 } {
   return {
     title: "Set Voice Channel Limit",
-    customId: `${VOICE_MODAL_PREFIX}:limit:${channelId}`,
+    customId: `${VOICE_MODAL_PREFIX}:limit:${channelId}${global ? ":global" : ""}`,
     components: [
       {
         type: ComponentTypes.ActionRow,
@@ -197,14 +267,14 @@ export function buildLimitModal(channelId: string): {
   };
 }
 
-export function buildTransferSelect(channelId: string): readonly unknown[] {
+export function buildTransferSelect(channelId: string, global = false): readonly unknown[] {
   return [
     {
       type: ComponentTypes.ActionRow,
       components: [
         {
           type: ComponentTypes.UserSelect,
-          custom_id: `${VOICE_SELECT_PREFIX}:transfer:${channelId}`,
+          custom_id: `${VOICE_SELECT_PREFIX}:transfer:${channelId}${global ? ":global" : ""}`,
           placeholder: "Select the new owner",
           min_values: 1,
           max_values: 1,
@@ -214,7 +284,7 @@ export function buildTransferSelect(channelId: string): readonly unknown[] {
   ];
 }
 
-export function buildDeleteConfirmation(channelId: string): readonly unknown[] {
+export function buildDeleteConfirmation(channelId: string, global = false): readonly unknown[] {
   return [
     {
       type: ComponentTypes.ActionRow,
@@ -222,13 +292,13 @@ export function buildDeleteConfirmation(channelId: string): readonly unknown[] {
         {
           type: ComponentTypes.Button,
           style: ButtonStyles.Danger,
-          custom_id: `${VOICE_DELETE_PREFIX}:confirm:${channelId}`,
+          custom_id: `${VOICE_DELETE_PREFIX}:confirm:${channelId}${global ? ":global" : ""}`,
           emoji: { id: PANEL_EMOJIS.confirm.id, name: PANEL_EMOJIS.confirm.name },
         },
         {
           type: ComponentTypes.Button,
           style: ButtonStyles.Secondary,
-          custom_id: `${VOICE_DELETE_PREFIX}:cancel:${channelId}`,
+          custom_id: `${VOICE_DELETE_PREFIX}:cancel:${channelId}${global ? ":global" : ""}`,
           emoji: { id: PANEL_EMOJIS.cancel.id, name: PANEL_EMOJIS.cancel.name },
         },
       ],

@@ -9,7 +9,12 @@ import {
 import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
 import { createSetupCommandService } from "../src/lib/j2c/setup-command-service.ts";
 import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
-import { DEFAULT_SETUP_CATEGORY_NAME, DEFAULT_SETUP_LOBBY_NAME } from "../src/lib/j2c/setup-channel-names.ts";
+import {
+  DEFAULT_SETUP_CATEGORY_NAME,
+  DEFAULT_SETUP_INTERFACE_NAME,
+  DEFAULT_SETUP_LOBBY_NAME,
+} from "../src/lib/j2c/setup-channel-names.ts";
+import { GLOBAL_VOICE_PANEL_PREFIX, IS_COMPONENTS_V2 } from "../src/lib/j2c/voice-panel.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 
@@ -208,6 +213,55 @@ describe("/setup command", () => {
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
       /not configured in this server/i,
     );
+  });
+
+  test("/setup interface enables and disables a shared global voice panel", async () => {
+    const { setup, controls, configs } = createSetupDeps();
+    controls.currentUser = { id: "111111111111111111", username: "Pure" };
+    await setup.execute(baseInteraction());
+
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765440",
+        options: [
+          {
+            name: "interface",
+            type: 1,
+            options: [{ name: "enabled", type: 5, value: true }],
+          },
+        ],
+      }),
+    );
+
+    const enabled = await configs.findByGuildId("123456789012345678");
+    expect(enabled?.interfaceChannelId).toBeDefined();
+    const create = controls.guildChannelCreates.at(-1);
+    expect(create?.name).toBe(DEFAULT_SETUP_INTERFACE_NAME);
+    expect(create?.type).toBe(ChannelTypes.GuildText);
+    expect(create?.parentId).toBe(enabled?.categoryId);
+    const panel = controls.channelMessages.at(-1);
+    expect(panel?.channelId).toBe(enabled?.interfaceChannelId);
+    expect(panel?.flags).toBe(IS_COMPONENTS_V2);
+    expect(JSON.stringify(panel?.components)).toContain(`${GLOBAL_VOICE_PANEL_PREFIX}:lock`);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Voice Interface Enabled/i);
+
+    await setup.execute(
+      baseInteraction({
+        id: "987654321098765441",
+        options: [
+          {
+            name: "interface",
+            type: 1,
+            options: [{ name: "enabled", type: 5, value: false }],
+          },
+        ],
+      }),
+    );
+
+    const disabled = await configs.findByGuildId("123456789012345678");
+    expect(disabled?.interfaceChannelId).toBeUndefined();
+    expect(controls.channels.has(enabled!.interfaceChannelId!)).toBe(false);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Voice Interface Disabled/i);
   });
 
   test("compensates when lobby channel creation fails", async () => {
