@@ -17,7 +17,6 @@ export interface CommandContext {
   };
   readonly setup?: {
     execute(interaction: InteractionCreatePayload): Promise<void>;
-    autocomplete?(interaction: InteractionCreatePayload): Promise<void>;
   };
 }
 

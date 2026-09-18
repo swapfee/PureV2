@@ -125,7 +125,6 @@ describe("/setup command", () => {
             name: "config",
             type: 1,
             options: [
-              { name: "channel", type: 3, value: saved!.lobbyChannelId },
               { name: "editable", type: 5, value: true },
               { name: "name", type: 3, value: "{username}'s room" },
               { name: "limit", type: 4, value: 8 },
@@ -168,7 +167,6 @@ describe("/setup command", () => {
             name: "config",
             type: 1,
             options: [
-              { name: "channel", type: 3, value: saved!.lobbyChannelId },
               { name: "category", type: 7, value: otherCategoryId },
             ],
           },
@@ -182,9 +180,8 @@ describe("/setup command", () => {
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Setup Updated/i);
   });
 
-  test("/setup config rejects a non-lobby channel", async () => {
+  test("/setup config rejects when Join to Create is not configured", async () => {
     const { setup, controls } = createSetupDeps();
-    await setup.execute(baseInteraction());
 
     await setup.execute(
       baseInteraction({
@@ -193,17 +190,14 @@ describe("/setup command", () => {
           {
             name: "config",
             type: 1,
-            options: [
-              { name: "channel", type: 3, value: "999999999999999999" },
-              { name: "editable", type: 5, value: true },
-            ],
+            options: [{ name: "editable", type: 5, value: true }],
           },
         ],
       }),
     );
 
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /not the Join to Create channel/i,
+      /not configured in this server/i,
     );
   });
 
@@ -310,7 +304,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [{ name: "channel", type: 3, value: config!.lobbyChannelId }],
+        options: [],
       }),
     );
 
@@ -355,7 +349,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [{ name: "channel", type: 3, value: config!.lobbyChannelId }],
+        options: [],
       }),
     );
 
@@ -364,65 +358,18 @@ describe("/setup command", () => {
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
   });
 
-  test("autocomplete for setup config and reset lists only the Join to Create lobby", async () => {
-    const { setup, configs, controls } = createSetupDeps();
-    await setup.execute(baseInteraction());
-    const saved = await configs.findByGuildId("123456789012345678");
-    expect(saved).toBeDefined();
-
-    const tempId = "444444444444444444";
-    controls.channels.set(tempId, {
-      id: tempId,
-      name: "User room",
-      type: ChannelTypes.GuildVoice,
-      guildId: "123456789012345678",
-      parentId: saved!.categoryId,
-      permissionOverwrites: [],
-    });
-
-    await setup.autocomplete(
-      baseInteraction({
-        type: 4,
-        options: [
-          {
-            name: "config",
-            type: 1,
-            options: [{ name: "channel", type: 3, value: "", focused: true }],
-          },
-        ],
-      }),
-    );
-    await setup.autocomplete(
-      baseInteraction({
-        type: 4,
-        commandName: "reset",
-        options: [{ name: "channel", type: 3, value: "", focused: true }],
-      }),
-    );
-
-    expect(controls.autocompleteResponses).toHaveLength(2);
-    for (const response of controls.autocompleteResponses) {
-      expect(response.choices).toEqual([
-        { name: DEFAULT_SETUP_LOBBY_NAME, value: saved!.lobbyChannelId },
-      ]);
-    }
-  });
-
-  test("reset rejects a managed temporary voice channel id", async () => {
-    const { setup, configs, controls } = createSetupDeps();
-    await setup.execute(baseInteraction());
-    const saved = await configs.findByGuildId("123456789012345678");
-    expect(saved).toBeDefined();
+  test("reset rejects when Join to Create is not configured", async () => {
+    const { setup, controls } = createSetupDeps();
 
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [{ name: "channel", type: 3, value: "444444444444444444" }],
+        options: [],
       }),
     );
 
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
-      /not the Join to Create channel/i,
+      /not configured in this server/i,
     );
   });
 });

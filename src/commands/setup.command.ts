@@ -27,13 +27,6 @@ const setupCommandData: CreateApplicationCommand = {
       description: "Modify an existing setup's settings",
       options: [
         {
-          type: ApplicationCommandOptionTypes.String,
-          name: "channel",
-          description: "The Join to Create channel to configure",
-          required: true,
-          autocomplete: true,
-        },
-        {
           type: ApplicationCommandOptionTypes.Boolean,
           name: "editable",
           description: "Do you want the channel to be editable by the user?",

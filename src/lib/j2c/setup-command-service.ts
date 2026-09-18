@@ -15,11 +15,6 @@ import {
 } from "./action-response.ts";
 import { runFactoryReset } from "./factory-reset.ts";
 import {
-  buildJoinToCreateLobbyAutocompleteChoices,
-  isJoinToCreateLobbyAutocomplete,
-  readJoinToCreateLobbyAutocompleteQuery,
-} from "./j2c-lobby-autocomplete.ts";
-import {
   DEFAULT_SETUP_CATEGORY_NAME,
   DEFAULT_SETUP_LOBBY_NAME,
   normalizeSetupChannelName,
@@ -107,7 +102,6 @@ function parsePermissionSource(raw: string | number | boolean | undefined): Guil
 
 export interface SetupCommandService {
   execute(interaction: InteractionCreatePayload): Promise<void>;
-  autocomplete(interaction: InteractionCreatePayload): Promise<void>;
 }
 
 export function createSetupCommandService(options: {
@@ -121,39 +115,6 @@ export function createSetupCommandService(options: {
   const { configs, channels, reservations, occupancy, discord, logger } = options;
 
   return {
-    async autocomplete(interaction): Promise<void> {
-      if (!interaction.guildId || !isJoinToCreateLobbyAutocomplete(interaction)) {
-        await discord.respondToAutocomplete({
-          interactionId: interaction.id,
-          interactionToken: interaction.token,
-          choices: [],
-        });
-        return;
-      }
-
-      if (!hasManageGuild(interaction.memberPermissions)) {
-        await discord.respondToAutocomplete({
-          interactionId: interaction.id,
-          interactionToken: interaction.token,
-          choices: [],
-        });
-        return;
-      }
-
-      const choices = await buildJoinToCreateLobbyAutocompleteChoices({
-        guildId: interaction.guildId,
-        query: readJoinToCreateLobbyAutocompleteQuery(interaction),
-        configs,
-        discord,
-      });
-
-      await discord.respondToAutocomplete({
-        interactionId: interaction.id,
-        interactionToken: interaction.token,
-        choices,
-      });
-    },
-
     async execute(interaction): Promise<void> {
       const reply = async (message: ActionMessage): Promise<void> => {
         await discord.respondToInteraction({
@@ -196,22 +157,10 @@ export function createSetupCommandService(options: {
       });
 
       if (isReset) {
-        const channelRaw = optionValue(sub.options, "channel");
-        if (typeof channelRaw !== "string") {
-          await finish(failureResponse("Specify the Join to Create channel to reset."));
-          return;
-        }
-
         const configured = await configs.findByGuildId(interaction.guildId);
         if (!configured) {
           await finish(
             failureResponse("Join to Create System is not configured in this server."),
-          );
-          return;
-        }
-        if (channelRaw !== configured.lobbyChannelId) {
-          await finish(
-            failureResponse("That channel is not the Join to Create channel for this server."),
           );
           return;
         }
@@ -385,16 +334,6 @@ export function createSetupCommandService(options: {
     const { interaction, guildId, subOptions, existing, finish } = input;
     if (!existing) {
       await finish(failureResponse("Join to Create System is not configured in this server."));
-      return;
-    }
-
-    const channelRaw = optionValue(subOptions, "channel");
-    if (typeof channelRaw !== "string") {
-      await finish(failureResponse("Specify the Join to Create channel to configure."));
-      return;
-    }
-    if (channelRaw !== existing.lobbyChannelId) {
-      await finish(failureResponse("That channel is not the Join to Create channel for this server."));
       return;
     }
 

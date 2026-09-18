@@ -115,7 +115,6 @@ export function createInteractionDispatcher(
     readonly vc?: { execute(interaction: InteractionCreatePayload): Promise<void> };
     readonly setup?: {
       execute(interaction: InteractionCreatePayload): Promise<void>;
-      autocomplete?(interaction: InteractionCreatePayload): Promise<void>;
     };
     readonly voicePanel?: {
       handles(interaction: InteractionCreatePayload): boolean;
@@ -132,18 +131,11 @@ export function createInteractionDispatcher(
 
       // Application command autocomplete (type 4) — no cooldown, no defer.
       if (interaction.type === 4) {
-        if (
-          (interaction.commandName === "setup" || interaction.commandName === "reset") &&
-          services?.setup?.autocomplete
-        ) {
-          await services.setup.autocomplete(interaction);
-        } else {
-          await discord.respondToAutocomplete({
-            interactionId: interaction.id,
-            interactionToken: interaction.token,
-            choices: [],
-          });
-        }
+        await discord.respondToAutocomplete({
+          interactionId: interaction.id,
+          interactionToken: interaction.token,
+          choices: [],
+        });
         return;
       }
 
