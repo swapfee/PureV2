@@ -140,7 +140,8 @@ const vcCommandData: CreateApplicationCommand = {
     {
       type: ApplicationCommandOptionTypes.SubCommand,
       name: "reject",
-      description: "Select connected members to deny and disconnect from your channel",
+      description: "Deny a member from this channel and disconnect them",
+      options: [memberOption],
     },
     {
       type: ApplicationCommandOptionTypes.SubCommand,
