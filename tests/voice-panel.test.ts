@@ -111,7 +111,9 @@ describe("voice panel builder", () => {
     const components = buildGlobalVoiceControlPanelComponents({ botUsername: "Pure" });
     expect(components).toHaveLength(1);
     const serialized = JSON.stringify(components);
-    expect(serialized).toContain("Pure's Global Interface");
+    expect(serialized).toContain("Pure's Interface");
+    expect(serialized).toContain("**Lock** — Prevent members from joining");
+    expect(serialized).not.toContain("â€”");
     expect(serialized).toContain(`${GLOBAL_VOICE_PANEL_PREFIX}:lock`);
     expect(serialized).not.toContain(channelId);
     expect(serialized).not.toContain(ownerId);

@@ -160,7 +160,7 @@ export function buildGlobalVoiceControlPanelComponents(options: {
 }): unknown[] {
   const heading = {
     type: ComponentTypes.TextDisplay,
-    content: `# ${options.botUsername}'s Global Interface\nManage the temporary voice channel you are currently connected to.`,
+    content: `# ${options.botUsername}'s Interface\nManage the temporary voice channel you are currently connected to.`,
   };
   const separator = {
     type: ComponentTypes.Separator,
@@ -170,16 +170,16 @@ export function buildGlobalVoiceControlPanelComponents(options: {
   const commandList = {
     type: ComponentTypes.TextDisplay,
     content: [
-      `${emojiMention(PANEL_EMOJIS.lock)} **Lock** â€” Prevent members from joining`,
-      `${emojiMention(PANEL_EMOJIS.unlock)} **Unlock** â€” Restore inherited access`,
-      `${emojiMention(PANEL_EMOJIS.hide)} **Hide** â€” Hide the channel from everyone`,
-      `${emojiMention(PANEL_EMOJIS.unhide)} **Unhide** â€” Restore inherited visibility`,
-      `${emojiMention(PANEL_EMOJIS.rename)} **Rename** â€” Change the channel name`,
-      `${emojiMention(PANEL_EMOJIS.limit)} **Limit** â€” Set the user limit`,
-      `${emojiMention(PANEL_EMOJIS.transfer)} **Transfer** â€” Transfer channel ownership`,
-      `${emojiMention(PANEL_EMOJIS.claim)} **Claim** â€” Claim an ownerless channel`,
-      `${emojiMention(PANEL_EMOJIS.info)} **Info** â€” View the current channel settings`,
-      `${emojiMention(PANEL_EMOJIS.delete)} **Delete** â€” Delete the temporary channel`,
+      `${emojiMention(PANEL_EMOJIS.lock)} **Lock** — Prevent members from joining`,
+      `${emojiMention(PANEL_EMOJIS.unlock)} **Unlock** — Restore inherited access`,
+      `${emojiMention(PANEL_EMOJIS.hide)} **Hide** — Hide the channel from everyone`,
+      `${emojiMention(PANEL_EMOJIS.unhide)} **Unhide** — Restore inherited visibility`,
+      `${emojiMention(PANEL_EMOJIS.rename)} **Rename** — Change the channel name`,
+      `${emojiMention(PANEL_EMOJIS.limit)} **Limit** — Set the user limit`,
+      `${emojiMention(PANEL_EMOJIS.transfer)} **Transfer** — Transfer channel ownership`,
+      `${emojiMention(PANEL_EMOJIS.claim)} **Claim** — Claim an ownerless channel`,
+      `${emojiMention(PANEL_EMOJIS.info)} **Info** — View the current channel settings`,
+      `${emojiMention(PANEL_EMOJIS.delete)} **Delete** — Delete the temporary channel`,
     ].join("\n"),
   };
   const row1 = {
