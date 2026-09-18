@@ -12,6 +12,7 @@ import type {
 import { createOwnershipService, type OwnershipService } from "./ownership.ts";
 import { createReconciler, type ReconciliationResult } from "./reconciliation.ts";
 import { createReservationService } from "./reservation-service.ts";
+import { creationRetryAfterDeletionEventId } from "./request-ids.ts";
 import type { Clock, TimerScheduler } from "./time.ts";
 import { systemTimerScheduler } from "./time.ts";
 import { createVoiceOccupancyTracker, type VoiceOccupancyTracker } from "./voice-occupancy.ts";
@@ -101,6 +102,36 @@ export function createJ2cRuntime(options: {
     metrics,
     logger: options.logger,
     occupancy,
+    onTemporaryChannelDeleted: async (record) => {
+      const config = await options.configs.findByGuildId(record.guildId);
+      if (!config?.enabled) return;
+
+      const voice = await options.discord.getUserVoiceChannel({
+        guildId: record.guildId,
+        userId: record.ownerId,
+      });
+      if (voice.kind !== "found" || voice.value.channelId !== config.lobbyChannelId) {
+        return;
+      }
+
+      const eventId = creationRetryAfterDeletionEventId(record.channelId);
+      const outcome = await creation.handleVoiceJoin({
+        eventId,
+        guildId: record.guildId,
+        memberId: record.ownerId,
+        joinedChannelId: config.lobbyChannelId,
+      });
+      options.logger.info("Join-to-Create post-deletion lobby retry completed", {
+        guildId: record.guildId,
+        ownerId: record.ownerId,
+        deletedChannelId: record.channelId,
+        eventId,
+        outcome: outcome.kind,
+        ...(outcome.kind === "failed" || outcome.kind === "cancelled"
+          ? { reason: outcome.reason }
+          : {}),
+      });
+    },
     ...(options.clock ? { clock: options.clock } : {}),
     ...(options.timers ? { timers: options.timers } : {}),
   });

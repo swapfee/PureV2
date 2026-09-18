@@ -407,6 +407,76 @@ describe("creation lifecycle", () => {
 });
 
 describe("empty-channel deletion lifecycle", () => {
+  test("retries creation when the former owner remains in the lobby during deletion", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await seedConfig(configs);
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const timers = createManualTimerScheduler();
+    const occupancy = createVoiceOccupancyTracker();
+    const { discord, controls } = createFakeDiscord();
+    const oldChannelId = "434343434343434343";
+    controls.channels.set(oldChannelId, {
+      id: oldChannelId,
+      name: "old-temp",
+      guildId,
+      permissionOverwrites: [],
+    });
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+    await channels.create({
+      guildId,
+      channelId: oldChannelId,
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-old-temp",
+      creationRequestId: "req-old-temp",
+      occupantIds: [memberId],
+    });
+
+    const runtime = createJ2cRuntime({
+      configs,
+      channels,
+      reservations,
+      discord,
+      metrics,
+      logger: testLogger(),
+      timers,
+      occupancy,
+      clock: { now: () => new Date(timers.nowMs()) },
+    });
+    occupancy.seedGuildVoiceStates(guildId, [
+      { userId: memberId, channelId: oldChannelId },
+    ]);
+    runtime.markOccupancyReady(true);
+
+    await runtime.voice.handle(
+      {
+        guildId,
+        userId: memberId,
+        channelId: lobbyId,
+        displayName: "Ada",
+      },
+      "owner-moved-directly-to-lobby",
+      1,
+    );
+
+    expect(controls.createCalls).toHaveLength(0);
+    await timers.advance(EMPTY_CHANNEL_DELAY_MS);
+
+    expect(controls.channels.has(oldChannelId)).toBe(false);
+    expect(controls.createCalls).toHaveLength(1);
+    const activeChannels = await channels.listActiveByGuild(guildId);
+    expect(activeChannels).toHaveLength(1);
+    const replacementId = activeChannels[0]?.channelId;
+    expect(replacementId).toBeDefined();
+    expect(replacementId).not.toBe(oldChannelId);
+    expect(controls.voiceByUser.get(`${guildId}:${memberId}`)).toBe(replacementId);
+    expect(metrics.snapshot().duplicateCreationsPrevented).toBe(1);
+    expect(metrics.snapshot().creationSuccesses).toBe(1);
+  });
+
   test("waits three seconds, rechecks membership, and deletes", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     const metrics = createJ2cMetrics();

@@ -99,6 +99,7 @@ export function createDeletionLifecycle(options: {
   readonly clock?: Clock;
   readonly timers?: TimerScheduler;
   readonly emptyDelayMs?: number;
+  readonly onTemporaryChannelDeleted?: (record: TemporaryChannelRecord) => Promise<void>;
 }): DeletionLifecycle {
   const clock = options.clock ?? systemClock();
   const timers = options.timers ?? systemTimerScheduler();
@@ -116,6 +117,23 @@ export function createDeletionLifecycle(options: {
   const refreshActiveGauge = async (): Promise<void> => {
     const count = await options.channels.countByStatus("active");
     options.metrics.setActiveTemporaryChannels(count);
+  };
+
+  const notifyTemporaryChannelDeleted = async (
+    record: TemporaryChannelRecord,
+  ): Promise<void> => {
+    if (!options.onTemporaryChannelDeleted) return;
+    try {
+      await options.onTemporaryChannelDeleted(record);
+    } catch (error: unknown) {
+      options.metrics.increment("poisonedLifecycleOperations");
+      options.logger.error("Post-deletion temporary channel callback failed", {
+        guildId: record.guildId,
+        channelId: record.channelId,
+        ownerId: record.ownerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   const executeDeletion = async (channelId: string, emptySinceMs: number): Promise<void> => {
@@ -178,6 +196,7 @@ export function createDeletionLifecycle(options: {
       }
       options.metrics.increment("deletionSuccesses");
       await refreshActiveGauge();
+      await notifyTemporaryChannelDeleted(record);
       options.logger.info("Temporary channel already missing; cleaned up", {
         guildId: record.guildId,
         channelId,
@@ -236,6 +255,7 @@ export function createDeletionLifecycle(options: {
       }
       options.metrics.increment("deletionSuccesses");
       await refreshActiveGauge();
+      await notifyTemporaryChannelDeleted(claimed);
       options.logger.info("Temporary channel deleted", {
         guildId: claimed.guildId,
         channelId,

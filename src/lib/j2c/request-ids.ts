@@ -12,6 +12,11 @@ export function deletionRequestId(channelId: string, emptySinceMs: number): stri
   return `j2c-delete:${channelId}:${emptySinceMs}`;
 }
 
+/** Stable synthetic event for retrying a lobby join after the owner's old channel is deleted. */
+export function creationRetryAfterDeletionEventId(channelId: string): string {
+  return `j2c-retry-delete:${channelId}`;
+}
+
 export function moveRequestId(eventId: string): string {
   return `j2c-move:${eventId}`;
 }
