@@ -80,7 +80,7 @@ describe("memory guild config repository", () => {
 });
 
 describe("memory temporary channel repository", () => {
-  test("enforces one active/creating channel per owner per guild and unique channel ids", async () => {
+  test("tracks multiple rooms per owner and keeps channel ids unique", async () => {
     const repo = createMemoryTemporaryChannelRepository();
     await repo.create({
       guildId: "123456789012345678",
@@ -92,20 +92,17 @@ describe("memory temporary channel repository", () => {
       creationRequestId: "req-1",
     });
 
-    try {
-      await repo.create({
-        guildId: "123456789012345678",
-        channelId: "333333333333333333",
-        ownerId: "999999999999999999",
-        lobbyChannelId: "222222222222222222",
-        status: "active",
-        reservationId: "res-2",
-        creationRequestId: "req-2",
-      });
-      throw new Error("expected owner uniqueness failure");
-    } catch (error) {
-      expect(error instanceof Error ? error.message : "").toMatch(/already has an active channel/);
-    }
+    await repo.create({
+      guildId: "123456789012345678",
+      channelId: "333333333333333333",
+      ownerId: "999999999999999999",
+      lobbyChannelId: "222222222222222222",
+      status: "active",
+      reservationId: "res-2",
+      creationRequestId: "req-2",
+      occupantIds: ["777777777777777777"],
+    });
+    expect(await repo.listActiveOwned("123456789012345678", "999999999999999999")).toHaveLength(1);
 
     try {
       await repo.create({
@@ -121,6 +118,32 @@ describe("memory temporary channel repository", () => {
     } catch (error) {
       expect(error instanceof Error ? error.message : "").toMatch(/already exists/);
     }
+  });
+
+  test("derived ownership updates after claim and deletion", async () => {
+    const repo = createMemoryTemporaryChannelRepository();
+    for (const [channelId, reservationId] of [
+      ["111111111111111111", "res-1"],
+      ["333333333333333333", "res-2"],
+    ] as const) {
+      await repo.create({
+        guildId: "123456789012345678",
+        channelId,
+        ownerId: "999999999999999999",
+        lobbyChannelId: "222222222222222222",
+        status: "active",
+        reservationId,
+        creationRequestId: `req-${reservationId}`,
+        occupantIds: ["777777777777777777"],
+      });
+    }
+
+    expect(await repo.listActiveOwned("123456789012345678", "999999999999999999")).toHaveLength(2);
+    await repo.transferOwner("333333333333333333", "888888888888888888");
+    expect(await repo.listActiveOwned("123456789012345678", "999999999999999999")).toHaveLength(1);
+    expect(await repo.listActiveOwned("123456789012345678", "888888888888888888")).toHaveLength(1);
+    await repo.remove("111111111111111111");
+    expect(await repo.listActiveOwned("123456789012345678", "999999999999999999")).toEqual([]);
   });
 });
 

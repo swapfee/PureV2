@@ -78,12 +78,9 @@ const temporaryChannelSchema = new Schema(
 
 temporaryChannelSchema.index({ channelId: 1 }, { unique: true, name: "temporary_channels_channelId_unique" });
 temporaryChannelSchema.index(
-  { guildId: 1, ownerId: 1 },
+  { guildId: 1, ownerId: 1, status: 1 },
   {
-    unique: true,
-    name: "temporary_channels_one_active_owner",
-    // deleting continues to block replacement until Discord confirms cleanup
-    partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
+    name: "temporary_channels_owner_status",
   },
 );
 temporaryChannelSchema.index({ status: 1, updatedAt: 1 }, { name: "temporary_channels_status_updatedAt" });

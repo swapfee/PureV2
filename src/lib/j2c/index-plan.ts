@@ -1,11 +1,12 @@
 import {
+  isLegacySingleOwnerIndex,
   REQUIRED_J2C_INDEX_SPECS,
   verifyRequiredIndexSpecs,
   type ListedMongoIndex,
   type RequiredIndexSpec,
 } from "./index-requirements.ts";
 
-export type IndexPlanAction = "create" | "match" | "conflict" | "unexpected";
+export type IndexPlanAction = "create" | "match" | "conflict" | "retire" | "unexpected";
 
 export interface IndexPlanEntry {
   readonly modelName: string;
@@ -22,6 +23,7 @@ export interface IndexPlan {
   readonly creates: readonly IndexPlanEntry[];
   readonly matches: readonly IndexPlanEntry[];
   readonly conflicts: readonly IndexPlanEntry[];
+  readonly retirements: readonly IndexPlanEntry[];
   readonly unexpected: readonly IndexPlanEntry[];
   readonly okToApply: boolean;
 }
@@ -109,6 +111,17 @@ export function planJ2cIndexes(
     for (const index of listed) {
       const name = index.name ?? "unnamed";
       if (name === "_id_" || requiredNames.has(name)) continue;
+      if (modelName === "TemporaryChannel" && isLegacySingleOwnerIndex(index)) {
+        entries.push({
+          modelName,
+          collectionName,
+          indexName: name,
+          action: "retire",
+          actual: index,
+          detail: "known_legacy_single_owner_constraint",
+        });
+        continue;
+      }
       entries.push({
         modelName,
         collectionName,
@@ -123,6 +136,7 @@ export function planJ2cIndexes(
   const creates = entries.filter((entry) => entry.action === "create");
   const matches = entries.filter((entry) => entry.action === "match");
   const conflicts = entries.filter((entry) => entry.action === "conflict");
+  const retirements = entries.filter((entry) => entry.action === "retire");
   const unexpected = entries.filter((entry) => entry.action === "unexpected");
 
   return {
@@ -130,6 +144,7 @@ export function planJ2cIndexes(
     creates,
     matches,
     conflicts,
+    retirements,
     unexpected,
     okToApply: conflicts.length === 0,
   };
@@ -166,7 +181,7 @@ export function indexCliUsage(): string {
     "  --confirm-production    Required with --apply when NODE_ENV=production",
     "  --help                  Show this help",
     "",
-    "Never drops indexes. Conflicting same-named indexes must be resolved manually.",
+    "Only the recognized legacy single-owner index is retired; other indexes are never dropped.",
   ].join("\n");
 }
 

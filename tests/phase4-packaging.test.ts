@@ -209,6 +209,29 @@ describe("index maintenance CLI gates", () => {
     ).toThrow(/conflict/i);
   });
 
+  test("plans retirement only for the exact legacy owner uniqueness index", () => {
+    const plan = planJ2cIndexes([
+      { modelName: "GuildConfig", indexes: [{ name: "_id_", key: { _id: 1 } }] },
+      {
+        modelName: "TemporaryChannel",
+        indexes: [
+          { name: "_id_", key: { _id: 1 } },
+          {
+            name: "temporary_channels_one_active_owner",
+            key: { guildId: 1, ownerId: 1 },
+            unique: true,
+            partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
+          },
+        ],
+      },
+      { modelName: "CreationReservation", indexes: [{ name: "_id_", key: { _id: 1 } }] },
+    ]);
+
+    expect(plan.retirements).toHaveLength(1);
+    expect(plan.retirements[0]?.indexName).toBe("temporary_channels_one_active_owner");
+    expect(plan.okToApply).toBe(true);
+  });
+
   test("requires --apply and production confirmation", () => {
     const plan = planJ2cIndexes([
       { modelName: "GuildConfig", indexes: [{ name: "_id_", key: { _id: 1 } }] },

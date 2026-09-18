@@ -39,11 +39,8 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       unique: true,
     },
     {
-      name: "temporary_channels_one_active_owner",
-      keys: { guildId: 1, ownerId: 1 },
-      unique: true,
-      // creating | active | deleting must all block a replacement channel
-      partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
+      name: "temporary_channels_owner_status",
+      keys: { guildId: 1, ownerId: 1, status: 1 },
     },
     {
       name: "temporary_channels_status_updatedAt",
@@ -77,6 +74,14 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       unique: true,
     },
   ],
+};
+
+/** Exact former index that enforced one live channel per owner. */
+export const LEGACY_SINGLE_OWNER_INDEX: RequiredIndexSpec = {
+  name: "temporary_channels_one_active_owner",
+  keys: { guildId: 1, ownerId: 1 },
+  unique: true,
+  partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
 };
 
 export interface IndexVerificationIssue {
@@ -132,6 +137,18 @@ function partialEqual(expected: unknown, actual: unknown): boolean {
 function collationEqual(expected: unknown, actual: unknown): boolean {
   if (expected === undefined && actual === undefined) return true;
   return jsonStable(expected) === jsonStable(actual);
+}
+
+export function isLegacySingleOwnerIndex(index: ListedMongoIndex): boolean {
+  return index.name === LEGACY_SINGLE_OWNER_INDEX.name &&
+    keysEqual(LEGACY_SINGLE_OWNER_INDEX.keys, index.key) &&
+    index.unique === true &&
+    partialEqual(
+      LEGACY_SINGLE_OWNER_INDEX.partialFilterExpression,
+      index.partialFilterExpression,
+    ) &&
+    index.expireAfterSeconds === undefined &&
+    index.collation === undefined;
 }
 
 export function verifyRequiredIndexSpecs(

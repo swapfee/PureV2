@@ -276,7 +276,10 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
       const doc = await TemporaryChannelModel.findOne({
         guildId,
         ownerId,
-        status: { $in: ["creating", "active", "deleting"] },
+        $or: [
+          { status: { $in: ["creating", "deleting"] } },
+          { status: "active", "occupantIds.0": { $exists: false } },
+        ],
       })
         .lean()
         .exec();
@@ -426,17 +429,6 @@ export function createMongooseTemporaryChannelRepository(): TemporaryChannelRepo
     },
 
     async transferOwner(channelId, newOwnerId) {
-      const current = await TemporaryChannelModel.findOne({ channelId, status: "active" }).lean().exec();
-      if (!current) return undefined;
-      const conflict = await TemporaryChannelModel.findOne({
-        guildId: current.guildId,
-        ownerId: newOwnerId,
-        status: { $in: ["creating", "active", "deleting"] },
-        channelId: { $ne: channelId },
-      })
-        .lean()
-        .exec();
-      if (conflict) return undefined;
       const doc = await TemporaryChannelModel.findOneAndUpdate(
         { channelId, status: "active" },
         { $set: { ownerId: newOwnerId }, $unset: { ownerAbsentSince: 1 } },

@@ -12,7 +12,11 @@ import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
 import { createDeletionLifecycle, EMPTY_CHANNEL_DELAY_MS } from "../src/lib/j2c/deletion-lifecycle.ts";
 import { createManualTimerScheduler } from "../src/lib/j2c/time.ts";
 import { createJ2cRuntime } from "../src/lib/j2c/runtime.ts";
-import { verifyRequiredIndexSpecs, hasRequiredJ2cIndexes } from "../src/lib/j2c/index-requirements.ts";
+import {
+  verifyRequiredIndexSpecs,
+  hasRequiredJ2cIndexes,
+  isLegacySingleOwnerIndex,
+} from "../src/lib/j2c/index-requirements.ts";
 import {
   createWorkerBotAdapter,
   isSyntheticWorkerToken,
@@ -47,10 +51,8 @@ describe("structural MongoDB index verification", () => {
       indexes: [
         { name: "temporary_channels_channelId_unique", key: { channelId: 1 }, unique: true },
         {
-          name: "temporary_channels_one_active_owner",
-          key: { guildId: 1, ownerId: 1 },
-          unique: true,
-          partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
+          name: "temporary_channels_owner_status",
+          key: { guildId: 1, ownerId: 1, status: 1 },
         },
         { name: "temporary_channels_status_updatedAt", key: { status: 1, updatedAt: 1 } },
         { name: "temporary_channels_guild_status", key: { guildId: 1, status: 1 } },
@@ -102,18 +104,15 @@ describe("structural MongoDB index verification", () => {
     expect(result.issues.some((issue) => issue.reason === "incorrect_unique_option")).toBe(true);
   });
 
-  test("rejects incorrect partial filter", () => {
-    const broken = structuredClone(valid);
-    const indexes = broken[1]!.indexes;
-    const ownerIndex = indexes.find((index) => index.name === "temporary_channels_one_active_owner");
-    expect(ownerIndex).toBeDefined();
-    if (!ownerIndex || !("partialFilterExpression" in ownerIndex)) {
-      throw new Error("expected owner uniqueness index");
-    }
-    Reflect.set(ownerIndex, "partialFilterExpression", { status: { $in: ["creating", "active"] } });
-    const result = verifyRequiredIndexSpecs(broken);
-    expect(result.ok).toBe(false);
-    expect(result.issues.some((issue) => issue.reason === "incorrect_partial_filter")).toBe(true);
+  test("recognizes only the exact legacy single-owner index for retirement", () => {
+    const legacy = {
+      name: "temporary_channels_one_active_owner",
+      key: { guildId: 1, ownerId: 1 },
+      unique: true,
+      partialFilterExpression: { status: { $in: ["creating", "active", "deleting"] } },
+    };
+    expect(isLegacySingleOwnerIndex(legacy)).toBe(true);
+    expect(isLegacySingleOwnerIndex({ ...legacy, unique: false })).toBe(false);
   });
 
   test("rejects missing required index", () => {
@@ -131,7 +130,7 @@ describe("structural MongoDB index verification", () => {
   });
 });
 
-describe("owner uniqueness while deleting", () => {
+describe("owner lifecycle guard while deleting", () => {
   test("blocks creation while previous channel is deleting", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     const reservations = createMemoryCreationReservationRepository();
@@ -156,20 +155,17 @@ describe("owner uniqueness while deleting", () => {
     });
     expect(decision.outcome).toBe("owner_has_channel");
 
-    try {
-      await channels.create({
-        guildId,
-        channelId: "555555555555555555",
-        ownerId,
-        lobbyChannelId: lobbyId,
-        status: "creating",
-        reservationId: "res-race",
-        creationRequestId: "req-race",
-      });
-      throw new Error("expected uniqueness failure");
-    } catch (error) {
-      expect(error instanceof Error ? error.message : "").toMatch(/already has an active channel/);
-    }
+    await channels.create({
+      guildId,
+      channelId: "555555555555555555",
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-retained",
+      creationRequestId: "req-retained",
+      occupantIds: [otherId],
+    });
+    expect(await channels.listActiveOwned(guildId, ownerId)).toHaveLength(1);
   });
 });
 

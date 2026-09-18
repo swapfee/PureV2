@@ -121,20 +121,6 @@ function ownerKey(guildId: string, ownerId: string): string {
 export function createMemoryTemporaryChannelRepository(): TemporaryChannelRepository {
   const byChannel = new Map<string, TemporaryChannelRecord>();
 
-  const assertOwnerUniqueness = (input: CreateTemporaryChannelInput): void => {
-    if (input.status !== "creating" && input.status !== "active" && input.status !== "deleting") return;
-    for (const record of byChannel.values()) {
-      if (
-        record.guildId === input.guildId &&
-        record.ownerId === input.ownerId &&
-        (record.status === "creating" || record.status === "active" || record.status === "deleting") &&
-        record.channelId !== input.channelId
-      ) {
-        throw new Error(`Owner ${ownerKey(input.guildId, input.ownerId)} already has an active channel`);
-      }
-    }
-  };
-
   const assertSequenceUniqueness = (input: CreateTemporaryChannelInput): void => {
     if (input.sequenceNumber === undefined) return;
     if (input.status !== "creating" && input.status !== "active" && input.status !== "deleting") return;
@@ -154,7 +140,6 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
 
   return {
     async create(input) {
-      assertOwnerUniqueness(input);
       assertSequenceUniqueness(input);
       if (byChannel.has(input.channelId)) throw new Error(`Channel ${input.channelId} already exists`);
       const now = new Date();
@@ -201,7 +186,9 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
         if (
           record.guildId === guildId &&
           record.ownerId === ownerId &&
-          (record.status === "creating" || record.status === "active" || record.status === "deleting")
+          (record.status === "creating" ||
+            record.status === "deleting" ||
+            (record.status === "active" && record.occupantIds.length === 0))
         ) {
           return cloneTemp(record);
         }
@@ -400,16 +387,6 @@ export function createMemoryTemporaryChannelRepository(): TemporaryChannelReposi
     async transferOwner(channelId, newOwnerId) {
       const existing = byChannel.get(channelId);
       if (!existing || existing.status !== "active") return undefined;
-      for (const record of byChannel.values()) {
-        if (
-          record.channelId !== channelId &&
-          record.guildId === existing.guildId &&
-          record.ownerId === newOwnerId &&
-          (record.status === "creating" || record.status === "active" || record.status === "deleting")
-        ) {
-          return undefined;
-        }
-      }
       const next: TemporaryChannelRecord = {
         ...existing,
         occupantIds: [...existing.occupantIds],

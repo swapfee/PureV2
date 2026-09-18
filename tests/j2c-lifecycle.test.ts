@@ -401,8 +401,40 @@ describe("creation lifecycle", () => {
       memberId,
       joinedChannelId: lobbyId,
     });
-    expect(second.kind).toBe("duplicate_prevented");
+    expect(second.kind).toBe("replay");
     expect(controls.createCalls).toHaveLength(1);
+  });
+
+  test("creates another room when the owner's previous room remains occupied", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await seedConfig(configs);
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+    await channels.create({
+      guildId,
+      channelId: "454545454545454545",
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-occupied-room",
+      creationRequestId: "req-occupied-room",
+      occupantIds: ["888888888888888888"],
+    });
+    const creation = buildCreation({ configs, channels, reservations, discord, metrics });
+
+    const result = await creation.handleVoiceJoin({
+      eventId: "event-additional-room",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+    });
+
+    expect(result.kind).toBe("created");
+    expect(controls.createCalls).toHaveLength(1);
+    expect(await channels.listActiveOwned(guildId, memberId)).toHaveLength(2);
   });
 });
 

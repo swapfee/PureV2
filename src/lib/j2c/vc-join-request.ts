@@ -394,13 +394,10 @@ export async function resolveManagedChannelTarget(options: {
     return byChannel;
   }
 
-  const byOwner = await options.channels.findActiveOrCreatingByOwner(
-    options.guildId,
-    options.target,
-  );
-  if (byOwner && byOwner.status === "active" && byOwner.guildId === options.guildId) {
-    return byOwner;
-  }
+  const owned = await options.channels.listActiveOwned(options.guildId, options.target);
+  // An owner ID is convenient only while it identifies exactly one room. Once
+  // an owner has multiple rooms, callers must use the unambiguous channel ID.
+  if (owned.length === 1) return owned[0];
   return undefined;
 }
 

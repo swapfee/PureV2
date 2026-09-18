@@ -141,7 +141,7 @@ docker compose run --rm --entrypoint bun purev2 run src/cli/indexes.ts -- --appl
 docker compose run --rm --entrypoint bun purev2 run src/cli/indexes.ts -- --verify
 ```
 
-Exit nonzero on conflicts or failed verification. Resolve conflicting same-named indexes manually. The CLI never drops indexes by default.
+Exit nonzero on conflicts or failed verification. Resolve conflicting same-named indexes manually. During this migration, apply retires only the structurally verified legacy `temporary_channels_one_active_owner` index; unrelated indexes are never dropped.
 
 ## 10. Register commands (development guild first)
 

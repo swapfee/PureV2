@@ -77,6 +77,7 @@ function printPlan(
       index: `${entry.modelName}/${entry.indexName}`,
       detail: entry.detail,
     })),
+    retirements: plan.retirements.map((entry) => `${entry.modelName}/${entry.indexName}`),
     unexpected: plan.unexpected.map((entry) => `${entry.modelName}/${entry.indexName}`),
     okToApply: plan.okToApply,
   });
@@ -137,6 +138,18 @@ export async function runIndexCli(
       if (!entry.expected) continue;
       await createMissingIndex(entry.modelName, entry.expected.keys, buildIndexCreateOptions(entry.expected));
       logger.info("Created index", {
+        modelName: entry.modelName,
+        collection: MODEL_COLLECTIONS[entry.modelName],
+        indexName: entry.indexName,
+      });
+    }
+
+    for (const entry of plan.retirements) {
+      if (entry.modelName !== "TemporaryChannel") {
+        throw new Error(`Refusing to retire unsupported index ${entry.modelName}/${entry.indexName}`);
+      }
+      await TemporaryChannelModel.collection.dropIndex(entry.indexName);
+      logger.info("Retired legacy single-owner index", {
         modelName: entry.modelName,
         collection: MODEL_COLLECTIONS[entry.modelName],
         indexName: entry.indexName,

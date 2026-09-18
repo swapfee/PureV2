@@ -1559,7 +1559,7 @@ export function createVcCommandService(options: {
             await reply(
               interaction,
               deferred,
-              failureResponse("Unable to transfer ownership. The member may already own another channel."),
+              failureResponse("Unable to transfer ownership right now."),
             );
             return;
           }

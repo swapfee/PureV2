@@ -32,7 +32,7 @@ export interface TemporaryChannelRepository {
   create(input: CreateTemporaryChannelInput): Promise<TemporaryChannelRecord>;
   findByChannelId(channelId: string): Promise<TemporaryChannelRecord | undefined>;
   findActiveOrCreatingByOwner(guildId: string, ownerId: string): Promise<TemporaryChannelRecord | undefined>;
-  /** creating | active | deleting — blocks replacement until cleanup completes */
+  /** Creating/deleting rooms and empty active rooms block; occupied active rooms do not. */
   findBlockingOwnedChannel(guildId: string, ownerId: string): Promise<TemporaryChannelRecord | undefined>;
   listByStatus(statuses: readonly TemporaryChannelStatus[]): Promise<readonly TemporaryChannelRecord[]>;
   listActiveByGuild(guildId: string): Promise<readonly TemporaryChannelRecord[]>;

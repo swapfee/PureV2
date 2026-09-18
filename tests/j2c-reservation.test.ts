@@ -81,7 +81,7 @@ describe("reservation service", () => {
     expect(replay.outcome).toBe("replay");
   });
 
-  test("blocks creation when owner already has an active channel", async () => {
+  test("blocks creation while an owned active channel is empty", async () => {
     const reservations = createMemoryCreationReservationRepository();
     const channels = createMemoryTemporaryChannelRepository();
     const metrics = createJ2cMetrics();
@@ -108,6 +108,32 @@ describe("reservation service", () => {
       expect(result.channelId).toBe("111111111111111111");
     }
     expect(metrics.snapshot().duplicateCreationsPrevented).toBe(1);
+  });
+
+  test("allows creation when every existing owned channel remains occupied", async () => {
+    const reservations = createMemoryCreationReservationRepository();
+    const channels = createMemoryTemporaryChannelRepository();
+    const metrics = createJ2cMetrics();
+    await channels.create({
+      guildId,
+      channelId: "111111111111111111",
+      ownerId: memberId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-existing",
+      creationRequestId: "req-existing",
+      occupantIds: ["888888888888888888"],
+    });
+    const service = createReservationService({ reservations, channels, metrics });
+
+    const result = await service.beginCreation({
+      reservationId: "res-new",
+      guildId,
+      memberId,
+      eventId: "event-new",
+      creationRequestId: "req-new",
+    });
+    expect(result.outcome).toBe("acquired");
   });
 
   test("expires due reservations and allows a new acquisition", async () => {

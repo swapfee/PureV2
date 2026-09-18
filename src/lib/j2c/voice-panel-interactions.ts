@@ -989,7 +989,7 @@ async function handleTransferSelect(input: {
     await input.discord.editInteractionResponse({
       applicationId: input.interaction.applicationId,
       interactionToken: input.interaction.token,
-      embeds: failureResponse("Unable to transfer ownership. The member may already own another channel.").embeds,
+      embeds: failureResponse("Unable to transfer ownership right now.").embeds,
       components: [],
     });
     return;
