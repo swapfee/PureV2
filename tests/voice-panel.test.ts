@@ -256,7 +256,7 @@ describe("voice panel interactions", () => {
           interfaceChannelId,
           {
             id: interfaceChannelId,
-            name: "voice-interface",
+            name: "interface",
             type: ChannelTypes.GuildText,
             guildId,
             permissionOverwrites: [],

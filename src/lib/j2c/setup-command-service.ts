@@ -457,7 +457,7 @@ export function createSetupCommandService(options: {
         reason,
       });
       if (deleted.kind !== "ok" && deleted.kind !== "missing") {
-        await finish(createFailureMessage(deleted, "remove the voice-interface channel"));
+        await finish(createFailureMessage(deleted, "remove the interface channel"));
         return;
       }
 
@@ -488,7 +488,7 @@ export function createSetupCommandService(options: {
         return;
       }
       if (current.kind !== "missing") {
-        await finish(createFailureMessage(current, "check the existing voice-interface channel"));
+        await finish(createFailureMessage(current, "check the existing interface channel"));
         return;
       }
     }
@@ -502,7 +502,7 @@ export function createSetupCommandService(options: {
       reason,
     });
     if (created.kind !== "found") {
-      await finish(createFailureMessage(created, "create the voice-interface channel"));
+      await finish(createFailureMessage(created, "create the interface channel"));
       return;
     }
     const interfaceChannelId = created.value.id;
@@ -550,7 +550,7 @@ export function createSetupCommandService(options: {
         guildId,
         error: error instanceof Error ? error.message : String(error),
       });
-      await finish(failureResponse("Unable to save the voice-interface setting. Please try again."));
+      await finish(failureResponse("Unable to save the interface setting. Please try again."));
     }
   }
 
