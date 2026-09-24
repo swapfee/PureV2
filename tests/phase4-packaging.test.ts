@@ -137,6 +137,7 @@ describe("Docker packaging artifacts", () => {
     expect(dockerfile).toContain("--frozen-lockfile");
     expect(dockerfile).toContain("bun run typecheck");
     expect(dockerfile).toContain("bun run lint");
+    expect(dockerfile).toContain("COPY Dockerfile compose.yaml .dockerignore ./");
     expect(dockerfile).toContain("COPY --from=build /app/package.json /app/bun.lock ./");
     expect(dockerfile).toContain("USER purev2");
     expect(dockerfile).toContain("EXPOSE 3000");

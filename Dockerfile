@@ -9,6 +9,7 @@ RUN bun install --frozen-lockfile
 
 FROM deps AS build
 COPY tsconfig.json .oxlintrc.json ./
+COPY Dockerfile compose.yaml .dockerignore ./
 COPY index.ts ./
 COPY src ./src
 COPY tests ./tests
