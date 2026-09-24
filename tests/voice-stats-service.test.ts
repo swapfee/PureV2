@@ -119,4 +119,52 @@ describe("managed voice statistics", () => {
     expect(snapshot.sessionCount).toBe(1);
     expect(snapshot.daily).toHaveLength(7);
   });
+
+  test("purges durable and cached statistics for only the selected guild", async () => {
+    const fx = fixture(new Date("2026-09-24T10:00:00Z"));
+    const otherGuildId = "678901234567890123";
+    const otherUserId = "789012345678901234";
+    const otherChannelId = "890123456789012345";
+    await fx.cache.connect();
+    await addManagedChannel(fx, channelA);
+    await fx.channels.create({
+      guildId: otherGuildId,
+      channelId: otherChannelId,
+      ownerId: otherUserId,
+      lobbyChannelId: "901234567890123456",
+      status: "active",
+      reservationId: "r-other",
+      creationRequestId: "c-other",
+    });
+    await fx.service.handle({ guildId, userId, channelId: channelA }, "event-target");
+    await fx.service.handle(
+      { guildId: otherGuildId, userId: otherUserId, channelId: otherChannelId },
+      "event-other",
+    );
+    await fx.service.getSnapshot(guildId, userId, "Target");
+
+    const result = await fx.service.purgeGuild(guildId);
+
+    expect(result).toEqual({ sessions: 1, members: 1, daily: 1, events: 1 });
+    expect(await fx.repository.findActive(guildId, userId)).toBeUndefined();
+    expect(await fx.repository.getMember(guildId, userId)).toBeUndefined();
+    expect(await fx.repository.findActive(otherGuildId, otherUserId)).toBeDefined();
+    expect([...fx.cache.values.keys()].some((key) => key.includes(guildId))).toBe(false);
+    expect([...fx.cache.values.keys()].some((key) => key.includes(otherGuildId))).toBe(true);
+  });
+
+  test("factory-reset finalization closes active sessions and cleanup-only rooms do not reopen", async () => {
+    const fx = fixture(new Date("2026-09-24T10:00:00Z"));
+    await fx.cache.connect();
+    await addManagedChannel(fx, channelA);
+    await fx.service.handle({ guildId, userId, channelId: channelA }, "join-before-reset");
+    fx.setNow(new Date("2026-09-24T10:05:00Z"));
+
+    await fx.channels.setCleanupCategoryId(channelA, "901234567890123456");
+    await fx.service.stopGuildTracking(guildId, "factory-reset:test");
+    await fx.service.handle({ guildId, userId, channelId: channelA }, "event-after-reset");
+
+    expect(await fx.repository.findActive(guildId, userId)).toBeUndefined();
+    expect((await fx.repository.getMember(guildId, userId))?.totalSeconds).toBe(300);
+  });
 });

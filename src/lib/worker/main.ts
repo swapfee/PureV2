@@ -144,6 +144,7 @@ export async function runWorkerMain(): Promise<void> {
     occupancy: j2c.occupancy,
     discord,
     logger: logger.child({ component: "setup" }),
+    stats,
   });
 
   const statsCommand = createStatsCommandService({

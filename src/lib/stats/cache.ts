@@ -17,6 +17,7 @@ export interface VoiceStatsCache {
   setJson(key: string, value: string, ttlSeconds?: number): Promise<void>;
   hasRecentEvent(eventId: string): Promise<boolean>;
   markRecentEvent(eventId: string): Promise<void>;
+  purgeGuild(guildId: string): Promise<void>;
 }
 
 function activeKey(guildId: string, userId: string): string {
@@ -29,6 +30,12 @@ export function statsQueryCacheKey(guildId: string, userId: string): string {
 
 function eventKey(eventId: string): string { return `purev2:stats:event:${eventId}`; }
 
+function isScanResponse(value: unknown): value is [string, string[]] {
+  return Array.isArray(value) && value.length === 2 &&
+    typeof value[0] === "string" && Array.isArray(value[1]) &&
+    value[1].every((item) => typeof item === "string");
+}
+
 export function createRedisVoiceStatsCache(url: string): VoiceStatsCache {
   const client = new RedisClient(url, {
     autoReconnect: true,
@@ -39,6 +46,17 @@ export function createRedisVoiceStatsCache(url: string): VoiceStatsCache {
   let ready = false;
   const run = async <T>(operation: () => Promise<T>): Promise<T> => {
     try { const result = await operation(); ready = client.connected; return result; } catch (error) { ready = false; throw error; }
+  };
+  const deletePattern = async (pattern: string): Promise<void> => {
+    let cursor = "0";
+    do {
+      const response = await run(() => client.send("SCAN", [cursor, "MATCH", pattern, "COUNT", "100"]));
+      if (!isScanResponse(response)) throw new Error("Redis SCAN returned an invalid response");
+      cursor = response[0];
+      if (response[1].length > 0) {
+        await run(() => client.send("DEL", response[1]));
+      }
+    } while (cursor !== "0");
   };
   return {
     async connect() {
@@ -63,6 +81,10 @@ export function createRedisVoiceStatsCache(url: string): VoiceStatsCache {
     async setJson(key, value, ttlSeconds = QUERY_TTL_SECONDS) { await run(() => client.set(key, value, "EX", ttlSeconds)); },
     async hasRecentEvent(eventId) { return (await run(() => client.get(eventKey(eventId)))) === "completed"; },
     async markRecentEvent(eventId) { await run(() => client.set(eventKey(eventId), "completed", "EX", EVENT_TTL_SECONDS)); },
+    async purgeGuild(guildId) {
+      await deletePattern(`purev2:stats:active:${guildId}:*`);
+      await deletePattern(`purev2:stats:query:${guildId}:*`);
+    },
   };
 }
 
@@ -81,5 +103,12 @@ export function createMemoryVoiceStatsCache(): VoiceStatsCache & { readonly valu
     async setJson(key, value) { values.set(key, value); },
     async hasRecentEvent(eventId) { return values.get(eventKey(eventId)) === "completed"; },
     async markRecentEvent(eventId) { values.set(eventKey(eventId), "completed"); },
+    async purgeGuild(guildId) {
+      const activePrefix = `purev2:stats:active:${guildId}:`;
+      const queryPrefix = `purev2:stats:query:${guildId}:`;
+      for (const key of values.keys()) {
+        if (key.startsWith(activePrefix) || key.startsWith(queryPrefix)) values.delete(key);
+      }
+    },
   };
 }

@@ -12,6 +12,13 @@ export interface OpenVoiceStatsSessionInput {
   readonly displayName?: string;
 }
 
+export interface VoiceStatsPurgeResult {
+  readonly sessions: number;
+  readonly members: number;
+  readonly daily: number;
+  readonly events: number;
+}
+
 export interface VoiceStatsRepository {
   acquireEvent(eventId: string, guildId: string, userId: string, at: Date, processingOwner: string): Promise<boolean>;
   completeEvent(eventId: string): Promise<void>;
@@ -25,6 +32,7 @@ export interface VoiceStatsRepository {
   getDaily(guildId: string, userId: string, from: Date, to: Date): Promise<readonly VoiceDailyStatsRecord[]>;
   countActiveDays(guildId: string, userId: string): Promise<number>;
   getLeaderboard(guildId: string, limit: number): Promise<readonly VoiceMemberStatsRecord[]>;
+  purgeGuild(guildId: string): Promise<VoiceStatsPurgeResult>;
 }
 
 export function utcDayStart(value: Date): Date {

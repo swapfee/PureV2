@@ -14,16 +14,20 @@ export function createMemoryVoiceStatsRepository(): VoiceStatsRepository & {
   const sessions = new Map<string, VoiceStatsSessionRecord>();
   const members = new Map<string, VoiceMemberStatsRecord>();
   const daily = new Map<string, VoiceDailyStatsRecord>();
-  const events = new Map<string, { status: "processing" | "completed" | "failed"; processingOwner: string }>();
+  const events = new Map<string, {
+    guildId: string;
+    status: "processing" | "completed" | "failed";
+    processingOwner: string;
+  }>();
   const findActive = (guildId: string, userId: string) =>
     [...sessions.values()].find((entry) => entry.guildId === guildId && entry.userId === userId && entry.status === "active");
   return {
     sessions, members, daily,
-    async acquireEvent(eventId, _guildId, _userId, _at, processingOwner) {
+    async acquireEvent(eventId, guildId, _userId, _at, processingOwner) {
       const event = events.get(eventId);
       if (event?.status === "completed") return false;
       if (event?.status === "processing" && event.processingOwner === processingOwner) return false;
-      events.set(eventId, { status: "processing", processingOwner });
+      events.set(eventId, { guildId, status: "processing", processingOwner });
       return true;
     },
     async completeEvent(eventId) {
@@ -82,5 +86,24 @@ export function createMemoryVoiceStatsRepository(): VoiceStatsRepository & {
     async getDaily(guildId, userId, from, to) { return [...daily.values()].filter((entry) => entry.guildId === guildId && entry.userId === userId && entry.day >= from && entry.day <= to).toSorted((a, b) => a.day.getTime() - b.day.getTime()); },
     async countActiveDays(guildId, userId) { return [...daily.values()].filter((entry) => entry.guildId === guildId && entry.userId === userId && (entry.durationSeconds > 0 || entry.sessionCount > 0)).length; },
     async getLeaderboard(guildId, limit) { return [...members.values()].filter((entry) => entry.guildId === guildId).toSorted((a, b) => b.totalSeconds - a.totalSeconds || a.userId.localeCompare(b.userId)).slice(0, limit); },
+    async purgeGuild(guildId) {
+      let sessionCount = 0;
+      let memberCount = 0;
+      let dailyCount = 0;
+      for (const [key, entry] of sessions) {
+        if (entry.guildId === guildId) { sessions.delete(key); sessionCount += 1; }
+      }
+      for (const [key, entry] of members) {
+        if (entry.guildId === guildId) { members.delete(key); memberCount += 1; }
+      }
+      for (const [key, entry] of daily) {
+        if (entry.guildId === guildId) { daily.delete(key); dailyCount += 1; }
+      }
+      let eventCount = 0;
+      for (const [key, entry] of events) {
+        if (entry.guildId === guildId) { events.delete(key); eventCount += 1; }
+      }
+      return { sessions: sessionCount, members: memberCount, daily: dailyCount, events: eventCount };
+    },
   };
 }

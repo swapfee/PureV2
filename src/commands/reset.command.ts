@@ -1,4 +1,4 @@
-import type { CreateApplicationCommand } from "discordeno";
+import { ApplicationCommandOptionTypes, type CreateApplicationCommand } from "discordeno";
 
 import type { CommandModule } from "../handlers/types.ts";
 import { failureResponse } from "../lib/j2c/action-response.ts";
@@ -6,6 +6,14 @@ import { failureResponse } from "../lib/j2c/action-response.ts";
 const resetCommandData: CreateApplicationCommand = {
   name: "reset",
   description: "Reset the Join to Create system for this server",
+  options: [
+    {
+      type: ApplicationCommandOptionTypes.Boolean,
+      name: "stat",
+      description: "Permanently delete this server's managed voice statistics (default: false)",
+      required: false,
+    },
+  ],
 };
 
 const resetCommand: CommandModule = {

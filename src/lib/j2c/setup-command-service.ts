@@ -153,8 +153,12 @@ export function createSetupCommandService(options: {
   readonly occupancy: VoiceOccupancyTracker;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
+  readonly stats?: {
+    stopGuildTracking(guildId: string, eventId: string): Promise<void>;
+    purgeGuild(guildId: string): Promise<unknown>;
+  };
 }): SetupCommandService {
-  const { configs, channels, reservations, occupancy, discord, logger } = options;
+  const { configs, channels, reservations, occupancy, discord, logger, stats } = options;
 
   return {
     async execute(interaction): Promise<void> {
@@ -185,6 +189,7 @@ export function createSetupCommandService(options: {
         return;
       }
 
+      const guildId = interaction.guildId;
       const sub = resolveSubcommand(interaction.commandName, interaction.options);
       const isReset = interaction.commandName === "reset" || sub.name === "reset";
       if (
@@ -204,8 +209,37 @@ export function createSetupCommandService(options: {
       });
 
       if (isReset) {
-        const configured = await configs.findByGuildId(interaction.guildId);
+        const deleteStats = optionValue(sub.options, "stat") === true;
+        const purgeStats = async (): Promise<boolean> => {
+          if (!stats) {
+            logger.error("Statistics purge is unavailable", {
+              guildId,
+              interactionId: interaction.id,
+            });
+            return false;
+          }
+          try {
+            await stats.purgeGuild(guildId);
+            return true;
+          } catch (error) {
+            logger.error("Statistics purge failed", {
+              guildId,
+              interactionId: interaction.id,
+              error,
+            });
+            return false;
+          }
+        };
+        const configured = await configs.findByGuildId(guildId);
         if (!configured) {
+          if (deleteStats) {
+            if (await purgeStats()) {
+              await finish(successResponse("Voice Statistics Reset Complete"));
+            } else {
+              await finish(failureResponse("Voice statistics could not be deleted."));
+            }
+            return;
+          }
           await finish(
             failureResponse("Join to Create System is not configured in this server."),
           );
@@ -213,7 +247,7 @@ export function createSetupCommandService(options: {
         }
 
         const result = await runFactoryReset({
-          guildId: interaction.guildId,
+          guildId,
           interactionId: interaction.id,
           configs,
           channels,
@@ -230,11 +264,43 @@ export function createSetupCommandService(options: {
           return;
         }
 
-        await finish(successResponse(RESET_SUCCESS_HEADLINE));
+        if (deleteStats) {
+          if (!(await purgeStats())) {
+            await finish(
+              failureResponse(
+                "Join to Create was reset, but voice statistics could not be deleted.",
+              ),
+            );
+            return;
+          }
+        } else if (stats) {
+          try {
+            await stats.stopGuildTracking(guildId, `factory-reset:${interaction.id}`);
+          } catch (error) {
+            logger.error("Factory reset completed but active statistics sessions could not close", {
+              guildId,
+              interactionId: interaction.id,
+              error,
+            });
+            await finish(
+              failureResponse(
+                "Join to Create was reset, but active voice statistics could not be finalized.",
+              ),
+            );
+            return;
+          }
+        }
+
+        await finish(
+          successResponse(
+            deleteStats
+              ? `${RESET_SUCCESS_HEADLINE}. Voice statistics were permanently deleted.`
+              : `${RESET_SUCCESS_HEADLINE}. Voice statistics were preserved.`,
+          ),
+        );
         return;
       }
 
-      const guildId = interaction.guildId;
       const existing = await configs.findByGuildId(guildId);
 
       if (sub.name === "config") {

@@ -6,7 +6,12 @@ import type { TemporaryChannelRepository } from "../j2c/repositories.ts";
 import type { VoiceStateUpdatePayload } from "../runtime-types.ts";
 import { statsQueryCacheKey, type VoiceStatsCache } from "./cache.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
-import { splitDurationByUtcDay, utcDayStart, type VoiceStatsRepository } from "./repositories.ts";
+import {
+  splitDurationByUtcDay,
+  utcDayStart,
+  type VoiceStatsPurgeResult,
+  type VoiceStatsRepository,
+} from "./repositories.ts";
 
 export interface VoiceStatsSnapshot {
   readonly guildId: string;
@@ -27,6 +32,8 @@ export interface VoiceStatsService {
   expectGuilds(guildIds: readonly string[]): void;
   checkpointGuild(guildId: string): Promise<void>;
   getSnapshot(guildId: string, userId: string, displayName: string): Promise<VoiceStatsSnapshot>;
+  stopGuildTracking(guildId: string, eventId: string): Promise<void>;
+  purgeGuild(guildId: string): Promise<VoiceStatsPurgeResult>;
   isReady(): boolean;
 }
 
@@ -107,7 +114,8 @@ export function createVoiceStatsService(options: Options): VoiceStatsService {
   const isManaged = async (channelId: string | null): Promise<boolean> => {
     if (!channelId) return false;
     const record = await options.channels.findByChannelId(channelId);
-    return record?.status === "active" || record?.status === "creating";
+    return !record?.cleanupCategoryId &&
+      (record?.status === "active" || record?.status === "creating");
   };
   const cacheFailure = (error: unknown, operation: string) => {
     options.metrics.increment("redisFailures");
@@ -238,6 +246,43 @@ export function createVoiceStatsService(options: Options): VoiceStatsService {
       };
       try { await options.cache.setJson(key, JSON.stringify(snapshot), 30); } catch (error) { cacheFailure(error, "query_set"); }
       return snapshot;
+    },
+    async stopGuildTracking(guildId, eventId) {
+      await serial(guildId, async () => {
+        const now = options.clock.now();
+        for (const session of await options.repository.listActiveByGuild(guildId)) {
+          await options.repository.close(guildId, session.userId, eventId, now);
+          options.metrics.increment("sessionCloses");
+          try {
+            await options.cache.deleteActive(guildId, session.userId);
+          } catch (error) {
+            cacheFailure(error, "reset_delete_active");
+          }
+        }
+      });
+    },
+    async purgeGuild(guildId) {
+      return serial(guildId, async () => {
+        const result = await options.repository.purgeGuild(guildId);
+        try {
+          await options.cache.purgeGuild(guildId);
+        } catch (error) {
+          // MongoDB is authoritative. Cache failure makes stats unready, but it
+          // must not turn a completed durable purge into a misleading failure.
+          cacheFailure(error, "purge_guild");
+        }
+        for (const key of lastSequences.keys()) {
+          if (key.startsWith(`${guildId}:`)) lastSequences.delete(key);
+        }
+        options.logger.info("Voice statistics deleted for guild", {
+          guildId,
+          deletedSessions: result.sessions,
+          deletedMembers: result.members,
+          deletedDailyRows: result.daily,
+          deletedEvents: result.events,
+        });
+        return result;
+      });
     },
     isReady: () => gatewayAnnounced && pendingGuilds.size === 0 && options.cache.isReady(),
   };

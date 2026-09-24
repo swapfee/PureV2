@@ -122,5 +122,34 @@ export function createMongooseVoiceStatsRepository(): VoiceStatsRepository {
       const docs = await VoiceMemberStatsModel.find({ guildId }).sort({ totalSeconds: -1, userId: 1 }).limit(limit).lean();
       return docs.map(memberRecord);
     },
+    async purgeGuild(guildId) {
+      let result = { sessions: 0, members: 0, daily: 0, events: 0 };
+      await VoiceStatsSessionModel.db.transaction(async (mongoSession) => {
+        // MongoDB does not support parallel operations within one transaction.
+        const sessions = await VoiceStatsSessionModel.deleteMany(
+          { guildId },
+          { session: mongoSession },
+        );
+        const members = await VoiceMemberStatsModel.deleteMany(
+          { guildId },
+          { session: mongoSession },
+        );
+        const daily = await VoiceDailyStatsModel.deleteMany(
+          { guildId },
+          { session: mongoSession },
+        );
+        const events = await VoiceStatsEventModel.deleteMany(
+          { guildId },
+          { session: mongoSession },
+        );
+        result = {
+          sessions: sessions.deletedCount,
+          members: members.deletedCount,
+          daily: daily.deletedCount,
+          events: events.deletedCount,
+        };
+      });
+      return result;
+    },
   };
 }

@@ -32,6 +32,8 @@ async function fixture(renderer: { render(snapshot: VoiceStatsCardData): Promise
     handle: async () => undefined, reconcileGuild: async () => undefined, checkpointGuild: async () => undefined,
     expectGuilds: () => undefined, isReady: () => true,
     getSnapshot: async (_guild, user, name) => ({ ...snapshot, userId: user, displayName: name }),
+    stopGuildTracking: async () => undefined,
+    purgeGuild: async () => ({ sessions: 0, members: 0, daily: 0, events: 0 }),
   };
   const service = createStatsCommandService({
     stats, discord: fake.discord,
@@ -97,6 +99,8 @@ describe("/stat command", () => {
         handle: async () => undefined, reconcileGuild: async () => undefined, checkpointGuild: async () => undefined,
         expectGuilds: () => undefined, isReady: () => true,
         getSnapshot: async (_guild, user, name) => ({ ...snapshot, userId: user, displayName: name }),
+        stopGuildTracking: async () => undefined,
+        purgeGuild: async () => ({ sessions: 0, members: 0, daily: 0, events: 0 }),
       },
       discord: fx.discord,
       renderer: { render: async (value) => { card = value; return new Uint8Array([137, 80, 78, 71]); } },
