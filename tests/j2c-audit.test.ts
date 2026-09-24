@@ -16,6 +16,7 @@ import {
   verifyRequiredIndexSpecs,
   hasRequiredJ2cIndexes,
   isLegacySingleOwnerIndex,
+  REQUIRED_J2C_INDEX_SPECS,
 } from "../src/lib/j2c/index-requirements.ts";
 import {
   createWorkerBotAdapter,
@@ -41,47 +42,17 @@ function testLogger(lines?: string[]) {
 }
 
 describe("structural MongoDB index verification", () => {
-  const valid = [
-    {
-      modelName: "GuildConfig",
-      indexes: [{ name: "guild_configs_guildId_unique", key: { guildId: 1 }, unique: true }],
-    },
-    {
-      modelName: "TemporaryChannel",
-      indexes: [
-        { name: "temporary_channels_channelId_unique", key: { channelId: 1 }, unique: true },
-        {
-          name: "temporary_channels_owner_status",
-          key: { guildId: 1, ownerId: 1, status: 1 },
-        },
-        { name: "temporary_channels_status_updatedAt", key: { status: 1, updatedAt: 1 } },
-        { name: "temporary_channels_guild_status", key: { guildId: 1, status: 1 } },
-      ],
-    },
-    {
-      modelName: "CreationReservation",
-      indexes: [
-        {
-          name: "creation_reservations_one_active",
-          key: { guildId: 1, memberId: 1 },
-          unique: true,
-          partialFilterExpression: { status: "reserved" },
-        },
-        { name: "creation_reservations_expiresAt", key: { expiresAt: 1 } },
-        { name: "creation_reservations_eventId", key: { eventId: 1 } },
-      ],
-    },
-    {
-      modelName: "OwnerBlockList",
-      indexes: [
-        {
-          name: "owner_block_lists_guild_owner_unique",
-          key: { guildId: 1, ownerId: 1 },
-          unique: true,
-        },
-      ],
-    },
-  ];
+  const valid = Object.entries(REQUIRED_J2C_INDEX_SPECS).map(([modelName, specs]) => ({
+    modelName,
+    indexes: specs.map((spec) => ({
+      name: spec.name,
+      key: { ...spec.keys },
+      ...(spec.unique === undefined ? {} : { unique: spec.unique }),
+      ...(spec.partialFilterExpression === undefined ? {} : { partialFilterExpression: spec.partialFilterExpression }),
+      ...(spec.expireAfterSeconds === undefined ? {} : { expireAfterSeconds: spec.expireAfterSeconds }),
+      ...(spec.collation === undefined ? {} : { collation: spec.collation }),
+    })),
+  }));
 
   test("accepts a valid index set", () => {
     expect(verifyRequiredIndexSpecs(valid).ok).toBe(true);
@@ -170,6 +141,21 @@ describe("owner lifecycle guard while deleting", () => {
 });
 
 describe("voice occupancy tracker", () => {
+  test("exports only seeded, currently connected human state for worker recovery", () => {
+    const occupancy = createVoiceOccupancyTracker();
+    occupancy.seedGuildVoiceStates(guildId, [
+      { userId: ownerId, channelId },
+      { userId: otherId, channelId: null },
+      { userId: "666666666666666666", channelId, isBot: true },
+    ]);
+    occupancy.markReady();
+
+    expect(occupancy.snapshotGuilds()).toEqual([{
+      guildId,
+      states: [{ userId: ownerId, channelId }],
+    }]);
+  });
+
   test("tracks two users and ignores stale leave after newer join", () => {
     const occupancy = createVoiceOccupancyTracker();
     occupancy.seedGuildVoiceStates(guildId, []);

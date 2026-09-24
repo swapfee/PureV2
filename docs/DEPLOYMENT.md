@@ -1,7 +1,7 @@
 # PureV2 deployment guide (Ubuntu 22.04)
 
-Controlled packaging for one Docker container (coordinator + in-process Bun workers).
-MongoDB is Atlas. Do not run Mongo or Redis on the VPS.
+Controlled packaging for one bot container (coordinator + in-process Bun workers) and one
+private, disposable Redis cache container. MongoDB remains Atlas and is the durable source of truth.
 
 This guide assumes Docker Engine and the Compose plugin are already installed on the server.
 
@@ -90,6 +90,7 @@ Required highlights:
 | `DISCORD_TOKEN` | Coordinator-only. Never passed to workers. |
 | `DISCORD_APPLICATION_ID` | Application snowflake. |
 | `MONGODB_URI` | Atlas URI with TLS (`mongodb+srv://...`). Separate prod DB. |
+| `REDIS_URL` | Keep `redis://redis:6379` under Compose. Redis has no published port. |
 | `BOT_WORKER_COUNT` | Start with `1`. A second worker partitions shards; it does not add Discord shards by itself. |
 | `REST_PROXY_HOST` | Must be `127.0.0.1`. |
 | `REST_PROXY_PORT` | `8081` (never published). |
@@ -170,7 +171,9 @@ docker compose up -d
 docker compose ps
 ```
 
-One service only: `purev2`. Workers are Bun child processes inside that container.
+The `purev2` service remains the only bot/coordinator service; workers are Bun child processes
+inside it. The separate `redis` service stores only bounded live/cache state and is not publicly
+published or authoritative.
 
 ## 12. Inspect health and readiness
 
@@ -182,7 +185,8 @@ curl -sS http://127.0.0.1:3000/readyz
 curl -sS http://127.0.0.1:3000/metrics
 ```
 
-Expect `/readyz` to report `ok: true` and `j2cReady: true` after cold start completes. Do not expose port 3000 on the public firewall.
+Expect `/readyz` to report `ok: true`, `j2cReady: true`, and `statsReady: true` after cold start,
+Gateway voice-state seeding, and statistics reconciliation complete. Do not expose port 3000 or Redis.
 
 ## 13. Inspect bounded logs
 
@@ -200,6 +204,10 @@ docker compose start
 # update:
 git pull   # or upload new sources
 docker compose build
+docker compose run --rm --entrypoint bun purev2 run src/cli/indexes.ts
+docker compose run --rm --entrypoint bun purev2 run src/cli/indexes.ts -- --apply --confirm-production
+docker compose run --rm --entrypoint bun purev2 run src/cli/indexes.ts -- --verify
+docker compose run --rm --entrypoint bun purev2 run src/cli/register-commands.ts -- --guild 1539918723396407357 --apply
 docker compose up -d
 ```
 

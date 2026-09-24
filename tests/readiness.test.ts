@@ -25,7 +25,8 @@ describe("allComponentsHealthy", () => {
       queueOverflow: { ok: true },
       poisonEvents: { ok: true },
       shutdown: { ok: true },
-      j2c: { ok: true },
+    j2c: { ok: true },
+    stats: { ok: true },
     };
     expect(allComponentsHealthy(healthy)).toBe(true);
     expect(allComponentsHealthy({ ...healthy, poisonEvents: { ok: false, detail: "poison=1" } })).toBe(false);

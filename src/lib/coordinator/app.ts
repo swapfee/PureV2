@@ -19,6 +19,7 @@ import {
 import { createRestManagerDiscordPort } from "../j2c/rest-discord-port.ts";
 import { createJ2cRuntime, type J2cRuntime } from "../j2c/runtime.ts";
 import { createLogger, type Logger } from "../logger.ts";
+import { assignWorker } from "../sharding.ts";
 import { createCoordinatorGateway } from "./gateway.ts";
 import {
   allComponentsHealthy,
@@ -107,6 +108,9 @@ function observeGatewayVoiceState(
       if (!userId) continue;
       const channelId = readSnowflakeField(record.channel_id);
       if (channelId === undefined) continue;
+      const member = asRecord(record.member);
+      const user = member ? asRecord(member.user) : undefined;
+      if (user?.bot === true) continue;
       seeded.push({ userId, channelId });
     }
     runtime.occupancy.seedGuildVoiceStates(guildId, seeded);
@@ -124,7 +128,7 @@ export function createCoordinatorRuntime(
     service: "purev2",
     role: "coordinator",
     level: config.LOG_LEVEL,
-    sensitiveValues: [config.DISCORD_TOKEN, config.REST_PROXY_AUTHORIZATION, config.MONGODB_URI],
+    sensitiveValues: [config.DISCORD_TOKEN, config.REST_PROXY_AUTHORIZATION, config.MONGODB_URI, config.REDIS_URL],
   }),
 ): CoordinatorRuntime {
   const metrics = createCoordinatorMetrics();
@@ -135,6 +139,30 @@ export function createCoordinatorRuntime(
   let serviceReady = false;
   let j2cRuntime: J2cRuntime | undefined;
   let voiceSequence = 0;
+  let workerSnapshotsEnabled = false;
+  const guildShardIds = new Map<string, number>();
+
+  const voiceSnapshotForWorker = (workerId: number) => {
+    if (!workerSnapshotsEnabled || !j2cRuntime?.occupancy.isReady()) return undefined;
+    const guilds = j2cRuntime.occupancy.snapshotGuilds().flatMap((guild) => {
+      const shardId = guildShardIds.get(guild.guildId);
+      if (shardId === undefined || assignWorker(shardId, config.BOT_WORKER_COUNT) !== workerId) return [];
+      return [{
+        guildId: guild.guildId,
+        states: guild.states.map((state) => ({
+          userId: state.userId,
+          channelId: state.channelId,
+        })),
+      }];
+    });
+    return {
+      type: "voiceStateSnapshot" as const,
+      snapshotId: crypto.randomUUID(),
+      workerId,
+      guilds,
+      at: new Date().toISOString(),
+    };
+  };
 
   const rest = createCoordinatorRest({
     token: config.DISCORD_TOKEN,
@@ -155,6 +183,7 @@ export function createCoordinatorRuntime(
     metrics,
     workerEntryPath: join(import.meta.dir, "../worker/main.ts"),
     restProxyBaseUrl: restProxyBaseUrl(config),
+    voiceSnapshotForWorker,
   });
 
   let gateway = createCoordinatorGateway({
@@ -169,6 +198,8 @@ export function createCoordinatorRuntime(
   const buildReadiness = (): ReadinessReport => {
     const eventSnapshot = supervisor.eventSnapshot();
     const j2cState = j2cRuntime?.readiness();
+    const requiredStatsWorkers = Math.min(config.BOT_WORKER_COUNT, Math.max(1, gateway.recommendedShardCount()));
+    const statsReady = supervisor.allWorkersStatsReady(requiredStatsWorkers);
     const components: Record<ReadinessComponent, ComponentStatus> = {
       coordinatorMongo: {
         ok: database?.isReady() ?? false,
@@ -222,6 +253,10 @@ export function createCoordinatorRuntime(
           ? "ready"
           : (j2cState?.detail ?? "pending_models_indexes_occupancy_or_reconciliation"),
       },
+      stats: {
+        ok: statsReady,
+        detail: statsReady ? "ready" : "warming_or_redis_unavailable",
+      },
     };
 
     const j2cReady = j2cState?.ready ?? false;
@@ -229,10 +264,12 @@ export function createCoordinatorRuntime(
       ok: serviceReady && allComponentsHealthy(components),
       phase: j2cReady ? "j2c" : "foundation",
       j2cReady,
+      statsReady,
       components,
       metrics: {
         ...metrics.snapshot(),
         j2c: j2cMetrics.snapshot(),
+        stats: supervisor.statsMetrics(),
       },
     };
   };
@@ -285,6 +322,7 @@ export function createCoordinatorRuntime(
         metrics,
         workerEntryPath: join(import.meta.dir, "../worker/main.ts"),
         restProxyBaseUrl: rest.baseUrl,
+        voiceSnapshotForWorker,
       });
       await supervisor.start();
 
@@ -356,6 +394,8 @@ export function createCoordinatorRuntime(
         connection,
         forwardEvent: (shardId, payload) => {
           voiceSequence += 1;
+          const guildId = extractGuildId(payload);
+          if (guildId !== undefined) guildShardIds.set(guildId, shardId);
           observeGatewayVoiceState(runtimeForVoice, payload, voiceSequence);
 
           const base = {
@@ -371,7 +411,6 @@ export function createCoordinatorRuntime(
             enqueuedAt: new Date().toISOString(),
             attempt: 1,
           };
-          const guildId = extractGuildId(payload);
           if (guildId !== undefined) {
             supervisor.forwardGatewayEvent({ ...base, guildId });
             return;
@@ -397,6 +436,8 @@ export function createCoordinatorRuntime(
       j2cRuntime.markOccupancyReady(true);
       await j2cRuntime.reconcileOccupancy();
       await j2cRuntime.scheduleRestartEmptyChannelResweeps();
+      workerSnapshotsEnabled = true;
+      supervisor.refreshVoiceSnapshots();
 
       serviceReady = true;
 

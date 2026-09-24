@@ -94,6 +94,8 @@ export interface FakeDiscordControls {
     content?: string;
     embeds?: readonly { description: string; color?: number; title?: string }[];
     components?: readonly unknown[];
+    files?: readonly { readonly name: string; readonly contentType: string; readonly data: Uint8Array }[];
+    requestId?: string;
   }[];
   readonly responses: {
     interactionId: string;
@@ -206,6 +208,8 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
         ...(request.components === undefined ? {} : { components: request.components }),
+        ...(request.files === undefined ? {} : { files: request.files }),
+        ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
       });
     },
 

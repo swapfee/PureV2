@@ -33,6 +33,7 @@ describe("parseCoordinatorConfig", () => {
     expect(config.REST_PROXY_PORT).toBe(8081);
     expect(config.MONGODB_MAX_POOL_SIZE).toBe(3);
     expect(config.WORKER_EVENT_MAX_ATTEMPTS).toBe(3);
+    expect(config.REDIS_URL).toBe("redis://127.0.0.1:6379");
     expect(restProxyBaseUrl(config)).toBe("http://127.0.0.1:8081");
   });
 
@@ -66,6 +67,10 @@ describe("parseCoordinatorConfig", () => {
     expect(() => parseCoordinatorConfig({ ...baseCoordinator, REST_PROXY_PORT: "70000" })).toThrow(
       /REST_PROXY_PORT/,
     );
+  });
+
+  test("rejects invalid Redis URLs", () => {
+    expect(() => parseCoordinatorConfig({ ...baseCoordinator, REDIS_URL: "https://redis.example" })).toThrow(/REDIS_URL/);
   });
 
   test("rejects invalid heartbeat relationship", () => {
@@ -120,6 +125,7 @@ describe("buildWorkerProcessEnv", () => {
     expect(env.DISCORD_APPLICATION_ID).toBe(config.DISCORD_APPLICATION_ID);
     expect(env.PUREV2_REST_PROXY_BASE_URL).toBe("http://127.0.0.1:8081");
     expect(env.REST_PROXY_AUTHORIZATION).toBe(config.REST_PROXY_AUTHORIZATION);
+    expect(env.REDIS_URL).toBe(config.REDIS_URL);
   });
 });
 

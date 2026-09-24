@@ -2,6 +2,7 @@ import {
   createRestManager,
   type RequestMethods,
   type RestManager,
+  type FileContent,
 } from "discordeno";
 
 import type { Logger } from "../logger.ts";
@@ -28,6 +29,7 @@ export interface CoordinatorRestOptions {
     method: RequestMethods,
     route: string,
     body: unknown,
+    files?: readonly FileContent[],
   ) => Promise<CachedResponse>;
 }
 
@@ -71,6 +73,16 @@ function isSafeDiscordRoute(routePath: string): boolean {
   return /^\/[A-Za-z0-9/_~\-.%@]+$/.test(routePath.split("?")[0] ?? routePath);
 }
 
+function routeClassification(route: string): string {
+  if (/^\/webhooks\/\d+\/[^/]+\/messages\/@original/.test(route)) return "webhook_original_message";
+  const first = route.split("?")[0]?.split("/").filter(Boolean)[0];
+  return first ? `${first}_route` : "unknown_route";
+}
+
+function allowsMultipart(method: RequestMethods, route: string): boolean {
+  return method === "PATCH" && /^\/webhooks\/\d+\/[^/]+\/messages\/@original(?:\?.*)?$/.test(route);
+}
+
 function readErrorStatus(error: unknown): number {
   if (typeof error !== "object" || error === null) return 500;
   if ("status" in error && typeof error.status === "number") return error.status;
@@ -104,9 +116,13 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
     method: RequestMethods,
     route: string,
     body: unknown,
+    files?: readonly FileContent[],
   ): Promise<CachedResponse> => {
-    if (options.executeRequest) return options.executeRequest(method, route, body);
-    const result = await rest.makeRequest(method, route, body === undefined ? undefined : { body });
+    if (options.executeRequest) return options.executeRequest(method, route, body, files);
+    const result = await rest.makeRequest(method, route, body === undefined && files === undefined ? undefined : {
+      ...(body === undefined ? {} : { body }),
+      ...(files === undefined ? {} : { files: [...files] }),
+    });
     if (result === undefined) return { status: 204, body: null };
     return { status: 200, body: result };
   };
@@ -150,18 +166,20 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
           }
 
           const route = `${routePath}${url.search}`;
+          const routeClass = routeClassification(route);
           options.metrics.increment("restProxyRequests");
 
           const requestId = request.headers.get(REST_REQUEST_ID_HEADER) ?? undefined;
+          const cacheKey = requestId ? `${requestId}:${method}:${route}` : undefined;
 
           try {
-            if (requestId) {
-              const cached = completed.get(requestId);
+            if (cacheKey) {
+              const cached = completed.get(cacheKey);
               if (cached) {
                 if (cached.status === 204) return new Response(null, { status: 204 });
                 return Response.json(cached.body, { status: cached.status });
               }
-              const pending = inFlight.get(requestId);
+              const pending = inFlight.get(cacheKey);
               if (pending) {
                 const shared = await pending;
                 if (shared.status === 204) return new Response(null, { status: 204 });
@@ -178,30 +196,57 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
             }
 
             let body: unknown;
+            let files: readonly FileContent[] | undefined;
             if (method !== "GET" && method !== "DELETE") {
-              const bodyText = await request.text();
-              if (Buffer.byteLength(bodyText, "utf8") > options.bodyLimitBytes) {
+              const bytes = await request.arrayBuffer();
+              if (bytes.byteLength > options.bodyLimitBytes) {
                 return structuredError("payload_too_large", "Request body exceeds configured limit", 413);
               }
-              if (bodyText.length > 0) {
+              const contentType = request.headers.get("content-type") ?? "";
+              if (contentType.toLowerCase().startsWith("multipart/form-data")) {
+                if (!allowsMultipart(method, route)) return structuredError("invalid_multipart_route", "Multipart is not permitted for this Discord route", 400);
                 try {
-                  body = JSON.parse(bodyText);
+                  const multipart = await new Response(bytes, { headers: { "content-type": contentType } }).formData();
+                  const entries = [...multipart.entries()];
+                  if (entries.some(([name]) => name !== "payload_json" && name !== "files[0]")) return structuredError("invalid_multipart_field", "Multipart contains an unsupported field", 400);
+                  const payloads = multipart.getAll("payload_json");
+                  const uploads = multipart.getAll("files[0]");
+                  if (payloads.length !== 1 || typeof payloads[0] !== "string") return structuredError("invalid_payload_json", "Multipart requires exactly one payload_json field", 400);
+                  if (uploads.length !== 1 || !(uploads[0] instanceof File)) return structuredError("invalid_file_count", "Multipart requires exactly one file", 400);
+                  const upload = uploads[0];
+                  if (upload.type !== "image/png" || !/^[A-Za-z0-9._-]{1,100}\.png$/i.test(upload.name)) return structuredError("invalid_file", "Only a safely named PNG file is accepted", 400);
+                  if (upload.size > options.bodyLimitBytes) return structuredError("payload_too_large", "PNG exceeds configured limit", 413);
+                  const parsed: unknown = JSON.parse(payloads[0]);
+                  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return structuredError("invalid_payload_json", "payload_json must be an object", 400);
+                  body = parsed;
+                  files = [{ name: upload.name, blob: upload }];
                 } catch {
-                  return structuredError("invalid_body", "Request body must be valid JSON", 400);
+                  return structuredError("invalid_multipart", "Malformed multipart request", 400);
+                }
+              } else {
+                const bodyText = new TextDecoder().decode(bytes);
+                if (bodyText.length > 0) {
+                  try {
+                    const parsed: unknown = JSON.parse(bodyText);
+                    if (typeof parsed !== "object" || parsed === null) return structuredError("invalid_body", "Request body must be a JSON object or array", 400);
+                    body = parsed;
+                  } catch {
+                    return structuredError("invalid_body", "Request body must be valid JSON", 400);
+                  }
                 }
               }
             }
 
-            const run = executeDiscordRequest(method, route, body);
-            if (requestId) inFlight.set(requestId, run);
+            const run = executeDiscordRequest(method, route, body, files);
+            if (cacheKey) inFlight.set(cacheKey, run);
 
             try {
               const result = await run;
-              if (requestId) completed.set(requestId, result);
+              if (cacheKey) completed.set(cacheKey, result);
               if (result.status === 204) return new Response(null, { status: 204 });
               return Response.json(result.body, { status: result.status });
             } finally {
-              if (requestId) inFlight.delete(requestId);
+              if (cacheKey) inFlight.delete(cacheKey);
             }
           } catch (error) {
             const status = readErrorStatus(error);
@@ -210,7 +255,7 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
             if (status === 404) {
               options.logger.debug("REST proxy upstream not found", {
                 method,
-                route,
+                routeClass,
                 requestId,
                 status,
               });
@@ -218,7 +263,7 @@ export function createCoordinatorRest(options: CoordinatorRestOptions): Coordina
               options.metrics.increment("restProxyErrors");
               options.logger.error("REST proxy request failed", {
                 method,
-                route,
+                routeClass,
                 requestId,
                 status,
                 error,

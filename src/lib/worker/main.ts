@@ -24,9 +24,17 @@ import { createVcCommandService } from "../j2c/vc-command-service.ts";
 import { createSetupCommandService } from "../j2c/setup-command-service.ts";
 import { createVoicePanelInteractionHandler } from "../j2c/voice-panel-interactions.ts";
 import { createVcMetrics } from "../j2c/vc-metrics.ts";
-import type { GatewayEventMessage, IpcMessage } from "../ipc/messages.ts";
+import type { GatewayEventMessage, IpcMessage, VoiceStateSnapshotMessage } from "../ipc/messages.ts";
 import { parseIpcMessage } from "../ipc/messages.ts";
 import { createLogger } from "../logger.ts";
+import { createRedisVoiceStatsCache, createMemoryVoiceStatsCache } from "../stats/cache.ts";
+import { createVoiceStatsCardRenderer } from "../stats/card-renderer.ts";
+import { createStatsCommandService } from "../stats/command-service.ts";
+import { createMemoryVoiceStatsRepository } from "../stats/memory-repository.ts";
+import { createVoiceStatsMetrics } from "../stats/metrics.ts";
+import { createMongooseVoiceStatsRepository } from "../stats/mongoose-repository.ts";
+import { createVoiceStatsService } from "../stats/service.ts";
+import { systemClock } from "../j2c/time.ts";
 import { createWorkerBot } from "./bot.ts";
 import { createInteractionDispatcher, wireBotEvents } from "./dispatch.ts";
 import { createEventDedupe } from "./event-dedupe.ts";
@@ -46,7 +54,7 @@ export async function runWorkerMain(): Promise<void> {
     role: "worker",
     level: config.LOG_LEVEL,
     context: { workerId: config.BOT_WORKER_ID },
-    sensitiveValues: [config.REST_PROXY_AUTHORIZATION, config.MONGODB_URI],
+    sensitiveValues: [config.REST_PROXY_AUTHORIZATION, config.MONGODB_URI, config.REDIS_URL],
   });
 
   const database = createMongoDatabase(toDatabaseConfig(config), logger);
@@ -77,6 +85,31 @@ export async function runWorkerMain(): Promise<void> {
     config.NODE_ENV === "test"
       ? createMemoryOwnerBlockListRepository()
       : createMongooseOwnerBlockListRepository();
+
+  const statsRepository = config.NODE_ENV === "test"
+    ? createMemoryVoiceStatsRepository()
+    : createMongooseVoiceStatsRepository();
+  const statsCache = config.NODE_ENV === "test"
+    ? createMemoryVoiceStatsCache()
+    : createRedisVoiceStatsCache(config.REDIS_URL);
+  const statsMetrics = createVoiceStatsMetrics();
+  try {
+    await statsCache.connect();
+  } catch (error) {
+    statsMetrics.increment("redisFailures");
+    logger.error("Voice statistics Redis unavailable; statistics remain disabled", {
+      component: "voice-stats",
+      error,
+    });
+  }
+  const stats = createVoiceStatsService({
+    repository: statsRepository,
+    channels: channelsRepo,
+    cache: statsCache,
+    metrics: statsMetrics,
+    logger: logger.child({ component: "voice-stats" }),
+    clock: systemClock(),
+  });
 
   const j2c = createJ2cRuntime({
     configs: configsRepo,
@@ -113,6 +146,16 @@ export async function runWorkerMain(): Promise<void> {
     logger: logger.child({ component: "setup" }),
   });
 
+  const statsCommand = createStatsCommandService({
+    stats,
+    channels: channelsRepo,
+    discord,
+    renderer: createVoiceStatsCardRenderer(),
+    cooldowns: createCooldownStore({ maxEntries: 2_000 }),
+    metrics: statsMetrics,
+    logger: logger.child({ component: "stat-command" }),
+  });
+
   const voicePanel = createVoicePanelInteractionHandler({
     channels: channelsRepo,
     configs: configsRepo,
@@ -128,8 +171,10 @@ export async function runWorkerMain(): Promise<void> {
     config.BOT_WORKER_ID,
     logger,
     discord,
-    { vc, setup, voicePanel },
+    { vc, setup, stats: statsCommand, voicePanel },
   );
+
+  const statsGuilds = new Set<string>();
 
   const context: EventContext = {
     workerId: config.BOT_WORKER_ID,
@@ -145,6 +190,14 @@ export async function runWorkerMain(): Promise<void> {
       },
       scheduleEmptyChannelDeletions: (guildId) => j2c.scheduleEmptyChannelDeletions(guildId),
       scheduleEmptyChannelDeletionResweep: (guildId) => j2c.scheduleEmptyChannelDeletionResweep(guildId),
+    },
+    stats: {
+      handle: (payload, eventId) => stats.handle(payload, eventId),
+      expectGuilds: (guildIds) => stats.expectGuilds(guildIds),
+      async reconcileGuild(guildId, states) {
+        await stats.reconcileGuild(guildId, states);
+        statsGuilds.add(guildId);
+      },
     },
   };
   wireBotEvents(bot, events, context);
@@ -167,6 +220,8 @@ export async function runWorkerMain(): Promise<void> {
     workerId: config.BOT_WORKER_ID,
     mongoReady: database.isReady(),
     modulesReady: true,
+    statsReady: stats.isReady(),
+    statsMetrics: statsMetrics.snapshot(),
     at: new Date().toISOString(),
   });
 
@@ -180,8 +235,24 @@ export async function runWorkerMain(): Promise<void> {
       at: new Date().toISOString(),
       inFlightCount,
       mongoReady: database.isReady(),
+      statsReady: stats.isReady(),
+      statsMetrics: statsMetrics.snapshot(),
     });
   }, config.WORKER_HEARTBEAT_INTERVAL_MS);
+
+  const redisHealthTimer = setInterval(() => {
+    void statsCache.refresh().catch((error: unknown) => {
+      logger.warn("Voice statistics Redis health check failed", { error });
+    });
+  }, config.WORKER_HEARTBEAT_INTERVAL_MS);
+
+  const checkpointTimer = setInterval(() => {
+    for (const guildId of statsGuilds) {
+      void stats.checkpointGuild(guildId).catch((error: unknown) => {
+        logger.error("Voice statistics checkpoint failed", { guildId, error });
+      });
+    }
+  }, config.VOICE_STATS_CHECKPOINT_INTERVAL_MS);
 
   const handleGatewayEvent = async (message: GatewayEventMessage): Promise<void> => {
     const begin = recentEvents.begin(message.eventId);
@@ -200,6 +271,7 @@ export async function runWorkerMain(): Promise<void> {
 
     inFlightCount += 1;
     context.currentEventId = message.eventId;
+    if (typeof message.payload.s === "number") context.currentGatewaySequence = message.payload.s;
     try {
       if (!isDiscordGatewayPayload(message.payload)) {
         throw new Error("Gateway event payload failed DiscordGatewayPayload validation");
@@ -230,7 +302,30 @@ export async function runWorkerMain(): Promise<void> {
       });
     } finally {
       delete context.currentEventId;
+      delete context.currentGatewaySequence;
       inFlightCount = Math.max(0, inFlightCount - 1);
+    }
+  };
+
+  let snapshotBarrier = Promise.resolve();
+  const handleVoiceStateSnapshot = async (message: VoiceStateSnapshotMessage): Promise<void> => {
+    if (message.workerId !== config.BOT_WORKER_ID) {
+      throw new Error(`Voice snapshot addressed to worker ${message.workerId}`);
+    }
+    const guildIds = message.guilds.map((guild) => guild.guildId);
+    stats.expectGuilds(guildIds);
+    for (const guild of message.guilds) {
+      j2c.occupancy.seedGuildVoiceStates(guild.guildId, guild.states);
+      await stats.reconcileGuild(
+        guild.guildId,
+        guild.states.map((state) => ({ guildId: guild.guildId, ...state })),
+      );
+      statsGuilds.add(guild.guildId);
+    }
+    j2c.occupancy.markReady();
+    for (const guild of message.guilds) {
+      await j2c.scheduleEmptyChannelDeletions(guild.guildId);
+      j2c.scheduleEmptyChannelDeletionResweep(guild.guildId);
     }
   };
 
@@ -244,12 +339,44 @@ export async function runWorkerMain(): Promise<void> {
     const message = parsed.message;
     switch (message.type) {
       case "gatewayEvent":
-        void handleGatewayEvent(message);
+        void snapshotBarrier.then(() => handleGatewayEvent(message));
+        break;
+      case "voiceStateSnapshot":
+        snapshotBarrier = snapshotBarrier.then(async () => {
+          try {
+            await handleVoiceStateSnapshot(message);
+            send({
+              type: "voiceStateSnapshotAck",
+              snapshotId: message.snapshotId,
+              workerId: config.BOT_WORKER_ID,
+              ok: true,
+              statsReady: stats.isReady(),
+              at: new Date().toISOString(),
+            });
+          } catch (error) {
+            logger.error("Failed to restore coordinator voice-state snapshot", {
+              snapshotId: message.snapshotId,
+              error,
+            });
+            send({
+              type: "voiceStateSnapshotAck",
+              snapshotId: message.snapshotId,
+              workerId: config.BOT_WORKER_ID,
+              ok: false,
+              statsReady: false,
+              at: new Date().toISOString(),
+              error: error instanceof Error ? error.message : "unknown_error",
+            });
+          }
+        });
         break;
       case "shutdown":
         shuttingDown = true;
         clearInterval(heartbeatTimer);
+        clearInterval(redisHealthTimer);
+        clearInterval(checkpointTimer);
         void (async () => {
+          statsCache.close();
           await database.close();
           logger.info("Worker shutting down", { reason: message.reason });
           process.exit(0);

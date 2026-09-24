@@ -147,14 +147,28 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
     },
 
     async editInteractionResponse(request) {
-      await bot.helpers.editOriginalInteractionResponse(request.interactionToken, {
+      const body = {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
         ...(request.components === undefined
           ? {}
           : { components: toMessageComponents(request.components) }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
-      });
+      };
+      const files = request.files?.map((file) => ({ name: file.name, blob: new Blob([file.data], { type: file.contentType }) }));
+      if (files) {
+        await bot.rest.makeRequest(
+          "PATCH",
+          `/webhooks/${request.applicationId}/${request.interactionToken}/messages/@original`,
+          {
+            body,
+            files,
+            ...(request.requestId ? { headers: { [REST_REQUEST_ID_HEADER]: request.requestId } } : {}),
+          },
+        );
+      } else {
+        await bot.helpers.editOriginalInteractionResponse(request.interactionToken, body);
+      }
     },
 
     async showModal(request) {

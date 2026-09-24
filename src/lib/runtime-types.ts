@@ -35,6 +35,8 @@ export interface VoiceStateUpdatePayload {
   readonly isBot?: boolean;
   /** Guild nick, global display name, or username when available from the event. */
   readonly displayName?: string;
+  /** Discord Gateway sequence used to reject delayed older transitions. */
+  readonly gatewaySequence?: number;
 }
 
 export interface ReadyPayload {
@@ -55,6 +57,12 @@ export interface InteractionEmbed {
   readonly description: string;
   readonly color?: number;
   readonly title?: string;
+}
+
+export interface InteractionFile {
+  readonly name: string;
+  readonly contentType: "image/png";
+  readonly data: Uint8Array;
 }
 
 export interface InteractionResponseRequest {
@@ -85,6 +93,8 @@ export interface EditInteractionResponseRequest {
   readonly embeds?: readonly InteractionEmbed[];
   readonly components?: readonly unknown[];
   readonly flags?: number;
+  readonly files?: readonly InteractionFile[];
+  readonly requestId?: string;
 }
 
 export interface ShowModalRequest {

@@ -137,6 +137,7 @@ describe("Docker packaging artifacts", () => {
     expect(dockerfile).toContain("--frozen-lockfile");
     expect(dockerfile).toContain("bun run typecheck");
     expect(dockerfile).toContain("bun run lint");
+    expect(dockerfile).toContain("COPY --from=build /app/package.json /app/bun.lock ./");
     expect(dockerfile).toContain("USER purev2");
     expect(dockerfile).toContain("EXPOSE 3000");
     expect(dockerfile).not.toMatch(/EXPOSE\s+8081/);
@@ -158,13 +159,17 @@ describe("Docker packaging artifacts", () => {
     expect(compose).not.toContain("privileged: true");
     expect(compose).not.toContain("/var/run/docker.sock");
     expect(compose).not.toMatch(/^\s*mongo:/im);
-    expect(compose).not.toMatch(/^\s*redis:/im);
+    expect(compose).toMatch(/^\s{2}redis:/m);
+    const redisBlock = compose.split(/^\s{2}redis:/m)[1] ?? "";
+    expect(redisBlock).not.toMatch(/^\s{4}ports:/m);
+    expect(redisBlock).toContain("--maxmemory-policy\", \"noeviction");
   });
 
-  test(".dockerignore excludes secrets, git, and tests from production context patterns", () => {
+  test(".dockerignore excludes secrets and git without blocking build-stage tests", () => {
     const ignore = readFileSync(join(root, ".dockerignore"), "utf8");
     expect(ignore).toContain(".env");
     expect(ignore).toContain(".git");
+    expect(ignore).not.toMatch(/^tests\/?$/m);
   });
 });
 
@@ -408,16 +413,17 @@ describe("graceful SIGTERM boundary", () => {
 });
 
 describe("logger redaction of production environment values", () => {
-  test("redacts Discord token, REST authorization, and Mongo URI", () => {
+  test("redacts Discord token, REST authorization, Mongo URI, and Redis credentials", () => {
     const lines: string[] = [];
     const token = "prod-discord-token-abc";
     const auth = "prod-rest-auth-0123456789abcdef";
     const mongo = "mongodb+srv://user:secretpass@cluster.example/purev2";
+    const redis = "redis://stats-user:redis-secret@redis.example:6379";
     const logger = createLogger({
       service: "purev2",
       role: "coordinator",
       level: "info",
-      sensitiveValues: [token, auth, mongo],
+      sensitiveValues: [token, auth, mongo, redis],
       write: (line) => lines.push(line),
     });
 
@@ -425,6 +431,7 @@ describe("logger redaction of production environment values", () => {
       DISCORD_TOKEN: token,
       REST_PROXY_AUTHORIZATION: auth,
       MONGODB_URI: mongo,
+      REDIS_URL: redis,
       HEALTH_HOST: "0.0.0.0",
     });
 
@@ -432,6 +439,7 @@ describe("logger redaction of production environment values", () => {
     expect(line.includes(token)).toBe(false);
     expect(line.includes(auth)).toBe(false);
     expect(line.includes("secretpass")).toBe(false);
+    expect(line.includes("redis-secret")).toBe(false);
     expect(line.includes("[REDACTED]")).toBe(true);
     expect(line.includes("0.0.0.0")).toBe(true);
   });

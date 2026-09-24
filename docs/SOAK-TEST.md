@@ -1,6 +1,6 @@
 # Development-guild soak-test checklist
 
-Run against a single development/test guild after indexes are applied, guild commands are registered, and `/readyz` reports `j2cReady: true`.
+Run against a single development/test guild after indexes are applied, guild commands are registered, and `/readyz` reports both `j2cReady: true` and `statsReady: true`.
 
 For every item: perform the action, then confirm the expected observable result.
 
@@ -9,6 +9,7 @@ For every item: perform the action, then confirm the expected observable result.
 | 1 | Bot cold start | Container becomes healthy; `/healthz` 200; `/readyz` eventually `ok: true`, `j2cReady: true`; no secrets in logs |
 | 2 | Readiness progression | Components move from pending to healthy in order (mongo → modules → REST → workers → gateway/shards → j2c); readiness stays false until complete |
 | 3 | Occupancy warm-up | After shards are healthy, occupancy-dependent reconciliation completes and j2c becomes ready |
+| 3a | Statistics warm-up | Redis connects and Mongo/Discordeno voice-state reconciliation completes before `statsReady` becomes true |
 | 4 | Join lobby and create channel | Joining the configured lobby creates a temporary voice channel and moves the member |
 | 5 | Leave lobby during creation | Leaving mid-creation does not leave orphaned “creating” state indefinitely; reservation/channel cleanup or completion is consistent |
 | 6 | Duplicate voice-state events | Duplicate/out-of-order updates do not create a second channel for the same owner |
@@ -28,6 +29,11 @@ For every item: perform the action, then confirm the expected observable result.
 | 20 | Unauthorized-user responses | Non-owners receive denial without channel mutation |
 | 21 | Atlas interruption | Transient Atlas blip surfaces as unhealthy readiness / structured errors; no silent partial mutations; recovery after Atlas returns |
 | 22 | Discord REST failure | Failed Discord calls are logged (redacted); retries/backoff behave safely; no duplicate channel storms |
+| 22a | `/stat` current member | While connected to an active managed channel, `/stat` returns a private 1600×900 PNG including current elapsed time |
+| 22b | `/stat member` | A human guild member can be selected; bot or missing targets are rejected privately |
+| 22c | `/stat` boundary | Outside a managed channel, the command refuses without rendering or uploading a file |
+| 22d | Redis restart | Restarting Redis makes stats unready; Mongo history remains and cache/session state rebuilds after reconciliation |
+| 22e | Statistics restart recovery | Restart the bot with members connected; active sessions reconcile without duplicate session totals |
 | 23 | Graceful SIGTERM | `docker compose stop` drains cleanly; container exits without orphan workers; temporary channels left in a reconcilable state |
 | 24 | Logs contain no secrets | Spot-check logs during the above: no Discord token, no Mongo password/URI secrets, no REST proxy authorization |
 

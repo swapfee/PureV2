@@ -24,7 +24,7 @@ WORKDIR /app
 RUN groupadd --system purev2 \
   && useradd --system --gid purev2 --home-dir /app --shell /usr/sbin/nologin purev2
 
-COPY package.json bun.lock ./
+COPY --from=build /app/package.json /app/bun.lock ./
 RUN bun install --frozen-lockfile --production \
   && chown -R purev2:purev2 /app
 

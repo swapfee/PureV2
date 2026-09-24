@@ -50,6 +50,15 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       name: "temporary_channels_guild_status",
       keys: { guildId: 1, status: 1 },
     },
+    {
+      name: "temporary_channels_guild_sequence_unique",
+      keys: { guildId: 1, sequenceNumber: 1 },
+      unique: true,
+      partialFilterExpression: {
+        status: { $in: ["creating", "active", "deleting"] },
+        sequenceNumber: { $type: "number" },
+      },
+    },
   ],
   CreationReservation: [
     {
@@ -73,6 +82,29 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       keys: { guildId: 1, ownerId: 1 },
       unique: true,
     },
+  ],
+  VoiceStatsSession: [
+    { name: "voice_stats_sessions_sessionId_unique", keys: { sessionId: 1 }, unique: true },
+    {
+      name: "voice_stats_sessions_one_active_user",
+      keys: { guildId: 1, userId: 1, status: 1 },
+      unique: true,
+      partialFilterExpression: { status: "active" },
+    },
+    { name: "voice_stats_sessions_member_startedAt", keys: { guildId: 1, userId: 1, startedAt: -1 } },
+    { name: "voice_stats_sessions_expiresAt_ttl", keys: { expiresAt: 1 }, expireAfterSeconds: 0 },
+  ],
+  VoiceMemberStats: [
+    { name: "voice_member_stats_guild_user_unique", keys: { guildId: 1, userId: 1 }, unique: true },
+    { name: "voice_member_stats_guild_leaderboard", keys: { guildId: 1, totalSeconds: -1, userId: 1 } },
+  ],
+  VoiceDailyStats: [
+    { name: "voice_daily_stats_guild_user_day_unique", keys: { guildId: 1, userId: 1, day: 1 }, unique: true },
+    { name: "voice_daily_stats_guild_day", keys: { guildId: 1, day: 1 } },
+  ],
+  VoiceStatsEvent: [
+    { name: "voice_stats_events_eventId_unique", keys: { eventId: 1 }, unique: true },
+    { name: "voice_stats_events_expiresAt_ttl", keys: { expiresAt: 1 }, expireAfterSeconds: 0 },
   ],
 };
 
@@ -247,6 +279,10 @@ export const REQUIRED_J2C_INDEX_NAMES = {
   TemporaryChannel: (REQUIRED_J2C_INDEX_SPECS.TemporaryChannel ?? []).map((spec) => spec.name),
   CreationReservation: (REQUIRED_J2C_INDEX_SPECS.CreationReservation ?? []).map((spec) => spec.name),
   OwnerBlockList: (REQUIRED_J2C_INDEX_SPECS.OwnerBlockList ?? []).map((spec) => spec.name),
+  VoiceStatsSession: (REQUIRED_J2C_INDEX_SPECS.VoiceStatsSession ?? []).map((spec) => spec.name),
+  VoiceMemberStats: (REQUIRED_J2C_INDEX_SPECS.VoiceMemberStats ?? []).map((spec) => spec.name),
+  VoiceDailyStats: (REQUIRED_J2C_INDEX_SPECS.VoiceDailyStats ?? []).map((spec) => spec.name),
+  VoiceStatsEvent: (REQUIRED_J2C_INDEX_SPECS.VoiceStatsEvent ?? []).map((spec) => spec.name),
 } as const;
 
 /** @deprecated Prefer verifyRequiredIndexSpecs */

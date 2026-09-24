@@ -32,6 +32,7 @@ describe("createHealthServer", () => {
           ok: ready,
           phase: "foundation",
           j2cReady: false,
+          statsReady: false,
           components: {
             coordinatorMongo: { ok: ready },
             moduleLoaders: { ok: ready },
@@ -45,6 +46,7 @@ describe("createHealthServer", () => {
             poisonEvents: { ok: true },
             shutdown: { ok: true },
             j2c: { ok: false, detail: "pending" },
+            stats: { ok: false, detail: "pending" },
           },
           metrics: metrics.snapshot(),
         }),

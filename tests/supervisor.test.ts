@@ -46,6 +46,65 @@ class FakeSubprocess implements SupervisedProcess {
 }
 
 describe("worker supervisor foundations", () => {
+  test("sends a coordinator voice snapshot on readiness and refresh", async () => {
+    const config = parseCoordinatorConfig({
+      DISCORD_TOKEN: "token",
+      DISCORD_APPLICATION_ID: "123456789012345678",
+      MONGODB_URI: "mongodb://127.0.0.1:27017/purev2-test",
+      REST_PROXY_AUTHORIZATION: "0123456789abcdef",
+      BOT_WORKER_COUNT: "1",
+      SHUTDOWN_TIMEOUT_MS: "1000",
+    });
+    let fake: FakeSubprocess | undefined;
+    let snapshotSequence = 0;
+    const supervisor = createWorkerSupervisor({
+      config,
+      logger: createLogger({ service: "purev2-test", role: "test", level: "error", write: () => undefined }),
+      metrics: createCoordinatorMetrics(),
+      workerEntryPath: "unused",
+      restProxyBaseUrl: "http://127.0.0.1:8081",
+      voiceSnapshotForWorker: (workerId) => ({
+        type: "voiceStateSnapshot",
+        snapshotId: `00000000-0000-4000-8000-${String(++snapshotSequence).padStart(12, "0")}`,
+        workerId,
+        guilds: [{ guildId: "123456789012345678", states: [] }],
+        at: "2026-01-01T00:00:00.000Z",
+      }),
+      spawnWorker: (workerId, _env, onMessage) => {
+        fake = new FakeSubprocess(onMessage);
+        queueMicrotask(() => fake?.emitFromWorker({
+          type: "workerReady",
+          workerId,
+          mongoReady: true,
+          modulesReady: true,
+          statsReady: false,
+          statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
+          at: new Date().toISOString(),
+        }));
+        return fake;
+      },
+    });
+
+    await supervisor.start();
+    await supervisor.waitUntilWorkersReady(2_000);
+    expect(fake?.messages.filter((message) => message.type === "voiceStateSnapshot")).toHaveLength(1);
+    supervisor.refreshVoiceSnapshots();
+    expect(fake?.messages.filter((message) => message.type === "voiceStateSnapshot")).toHaveLength(2);
+
+    const lastSnapshot = fake?.messages.findLast((message) => message.type === "voiceStateSnapshot");
+    if (!lastSnapshot || lastSnapshot.type !== "voiceStateSnapshot") throw new Error("missing snapshot");
+    fake?.emitFromWorker({
+      type: "voiceStateSnapshotAck",
+      snapshotId: lastSnapshot.snapshotId,
+      workerId: 0,
+      ok: true,
+      statsReady: true,
+      at: new Date().toISOString(),
+    });
+    expect(supervisor.allWorkersStatsReady()).toBe(true);
+    await supervisor.stop("test_done");
+  });
+
   test("never passes DISCORD_TOKEN and routes shards exclusively", async () => {
     for (const workerCount of [1, 2] as const) {
       const config = parseCoordinatorConfig({
@@ -85,6 +144,8 @@ describe("worker supervisor foundations", () => {
               workerId,
               mongoReady: true,
               modulesReady: true,
+              statsReady: workerId === 0,
+              statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
               at: new Date().toISOString(),
             });
           });
@@ -96,6 +157,8 @@ describe("worker supervisor foundations", () => {
       await supervisor.waitUntilWorkersReady(2_000);
 
       expect(supervisor.readyWorkerCount()).toBe(workerCount);
+      expect(supervisor.allWorkersStatsReady(1)).toBe(true);
+      if (workerCount === 2) expect(supervisor.allWorkersStatsReady(2)).toBe(false);
       expect(supervisor.lastWorkerEnv(0)?.DISCORD_TOKEN).toBeUndefined();
 
       const shards = workerCount === 2 ? [0] : [0, 1, 2, 3];
@@ -165,6 +228,8 @@ describe("worker supervisor foundations", () => {
             workerId: 0,
             mongoReady: true,
             modulesReady: true,
+            statsReady: true,
+            statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
             at: new Date().toISOString(),
           });
         });
@@ -245,6 +310,8 @@ describe("worker supervisor foundations", () => {
             workerId: 0,
             mongoReady: true,
             modulesReady: true,
+            statsReady: true,
+            statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
             at: new Date().toISOString(),
           });
         });
@@ -294,6 +361,8 @@ describe("worker supervisor foundations", () => {
             workerId,
             mongoReady: true,
             modulesReady: true,
+            statsReady: true,
+            statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
             at: new Date().toISOString(),
           });
         });
