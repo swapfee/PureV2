@@ -5,7 +5,7 @@ import { ChannelTypes } from "discordeno";
 import { createFakeDiscord } from "../src/lib/j2c/fake-discord.ts";
 import { createMemoryTemporaryChannelRepository } from "../src/lib/j2c/memory-repositories.ts";
 import { createLogger } from "../src/lib/logger.ts";
-import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
+import type { DiscordApiPort, InteractionCreatePayload } from "../src/lib/runtime-types.ts";
 import {
   buildGlobalVoiceControlPanelComponents,
   buildVoiceControlPanelComponents,
@@ -725,6 +725,60 @@ describe("voice panel interactions", () => {
     expect(controls.modals[0]?.title).toBe("Rename Voice Channel");
   });
 
+  test("uses an initial ephemeral response when opening a modal fails", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "room",
+            type: ChannelTypes.GuildVoice,
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+    const failingDiscord: DiscordApiPort = {
+      ...discord,
+      async showModal() {
+        throw new Error("modal unavailable");
+      },
+    };
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord: failingDiscord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        customId: `${VOICE_PANEL_PREFIX}:rename:${channelId}:${ownerId}`,
+      }),
+    );
+
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(controls.editedInteractions).toHaveLength(0);
+    expect(controls.responses.at(-1)?.embeds?.[0]?.description).toContain(
+      "unexpected error",
+    );
+  });
+
   test("claim succeeds immediately when the owner is not connected", async () => {
     const channels = createMemoryTemporaryChannelRepository();
     await channels.create({
@@ -1206,6 +1260,52 @@ describe("voice panel access gates", () => {
     );
     const record = await channels.findByChannelId(channelId);
     expect(record?.locked).toBe(false);
+  });
+
+  test("fails closed when the Discord channel type is unavailable", async () => {
+    const channels = createMemoryTemporaryChannelRepository();
+    await channels.create({
+      guildId,
+      channelId,
+      ownerId,
+      lobbyChannelId: lobbyId,
+      status: "active",
+      reservationId: "res-1",
+      creationRequestId: "req-1",
+      occupantIds: [ownerId],
+    });
+    const { discord, controls } = createFakeDiscord({
+      channels: new Map([
+        [
+          channelId,
+          {
+            id: channelId,
+            name: "unknown",
+            guildId,
+            permissionOverwrites: [],
+          },
+        ],
+      ]),
+    });
+    controls.voiceByUser.set(`${guildId}:${ownerId}`, channelId);
+
+    const handler = createVoicePanelInteractionHandler({
+      channels,
+      discord,
+      logger: testLogger(),
+      botUsername: "Pure",
+    });
+
+    await handler.execute(
+      interaction({
+        customId: `${VOICE_PANEL_PREFIX}:lock:${channelId}:${ownerId}`,
+      }),
+    );
+
+    expect(controls.editedInteractions.at(-1)?.embeds?.[0]?.description).toContain(
+      "managed voice channel",
+    );
+    expect(controls.overwriteCalls).toHaveLength(0);
   });
 
   test("delete cancel revalidates ownership", async () => {

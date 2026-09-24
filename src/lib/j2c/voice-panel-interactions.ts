@@ -193,10 +193,12 @@ async function requireManagedConnected(options: {
   if (channel.kind !== "found") {
     return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
-  // Treat missing type as unknown and continue; only reject known non-voice types.
+  // Fail closed when Discord cannot prove this is a guild voice channel. A
+  // persisted record alone must never authorize controls against another
+  // channel type or an incomplete lookup result.
   const guildVoiceType: number = ChannelTypes.GuildVoice;
   const channelType = channel.value.type;
-  if (channelType !== undefined && channelType !== guildVoiceType) {
+  if (channelType !== guildVoiceType) {
     return { ok: false, reason: PANEL_NOT_IN_MANAGED_MESSAGE };
   }
 
