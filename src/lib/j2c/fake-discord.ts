@@ -37,7 +37,7 @@ export interface FakeDiscordControls {
   /** guildId:userId -> server mute */
   readonly serverMuteByUser: Map<string, boolean>;
   readonly users: Map<string, { id: string; bot: boolean; username?: string; globalName?: string }>;
-  readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string }>;
+  readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string; avatarUrl?: string }>;
   readonly createCalls: CreateVoiceChannelRequest[];
   readonly positionCalls: {
     guildId: string;

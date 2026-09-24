@@ -5,6 +5,7 @@ import { failureResponse, successResponse } from "../j2c/action-response.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
 import type { VoiceStatsCardRenderer } from "./card-renderer.ts";
 import type { VoiceStatsService } from "./service.ts";
+import { createVoiceStatsAvatarLoader, type VoiceStatsAvatarLoader } from "./avatar-loader.ts";
 
 const COOLDOWN_MS = 15_000;
 const MAX_PNG_BYTES = 3_500_000;
@@ -21,6 +22,7 @@ export function createStatsCommandService(options: {
   readonly cooldowns: CooldownStore;
   readonly metrics: VoiceStatsMetrics;
   readonly logger: Logger;
+  readonly avatarLoader?: VoiceStatsAvatarLoader;
   readonly now?: () => number;
   readonly renderConcurrency?: number;
   readonly renderCacheLimit?: number;
@@ -28,6 +30,7 @@ export function createStatsCommandService(options: {
   const now = options.now ?? Date.now;
   const concurrency = options.renderConcurrency ?? 2;
   const cacheLimit = options.renderCacheLimit ?? 100;
+  const avatarLoader = options.avatarLoader ?? createVoiceStatsAvatarLoader();
   const renderCache = new Map<string, { readonly expiresAt: number; readonly data: Uint8Array }>();
   const renderInFlight = new Map<string, Promise<Uint8Array>>();
   const waiters: (() => void)[] = [];
@@ -92,7 +95,24 @@ export function createStatsCommandService(options: {
       const displayName = target.value.nick ?? target.value.globalName ?? target.value.username ?? `Member ${targetUserId.slice(-4)}`;
       try {
         const snapshot = await options.stats.getSnapshot(interaction.guildId, targetUserId, displayName);
-        const png = await render(`${interaction.guildId}:${targetUserId}`, () => options.renderer.render(snapshot));
+        let avatarData: Uint8Array | undefined;
+        if (target.value.avatarUrl) {
+          try {
+            avatarData = await avatarLoader.load(target.value.avatarUrl);
+          } catch (error) {
+            options.logger.warn("Voice statistics avatar unavailable; using fallback", {
+              guildId: interaction.guildId,
+              targetUserId,
+              error,
+            });
+          }
+        }
+        const username = target.value.username ?? displayName;
+        const png = await render(`${interaction.guildId}:${targetUserId}`, () => options.renderer.render({
+          ...snapshot,
+          username,
+          ...(avatarData ? { avatarData } : {}),
+        }));
         if (png.byteLength > MAX_PNG_BYTES) throw new Error("rendered_png_too_large");
         options.metrics.increment("renders");
         await options.discord.editInteractionResponse({

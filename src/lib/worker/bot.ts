@@ -2,6 +2,8 @@ import {
   ChannelTypes,
   createBot,
   InteractionResponseTypes,
+  avatarUrl as discordAvatarUrl,
+  memberAvatarUrl as discordMemberAvatarUrl,
   type MessageComponents,
 } from "discordeno";
 
@@ -413,13 +415,29 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         const memberUser = Reflect.get(member, "user");
         let username: string | undefined;
         let globalName: string | undefined;
+        let avatarUrl: string | undefined;
         let isBot = false;
         if (typeof memberUser === "object" && memberUser !== null) {
           const usernameRaw = Reflect.get(memberUser, "username");
           const globalNameRaw = Reflect.get(memberUser, "globalName");
+          const discriminatorRaw = Reflect.get(memberUser, "discriminator");
+          const userAvatarRaw = Reflect.get(memberUser, "avatar");
+          const memberAvatarRaw = Reflect.get(member, "avatar");
           const botRaw = Reflect.get(memberUser, "bot");
           if (typeof usernameRaw === "string") username = usernameRaw;
           if (typeof globalNameRaw === "string") globalName = globalNameRaw;
+          const discriminator = typeof discriminatorRaw === "string" ? discriminatorRaw : "0";
+          if (typeof memberAvatarRaw === "bigint") {
+            avatarUrl = discordMemberAvatarUrl(request.guildId, request.userId, {
+              avatar: memberAvatarRaw,
+              size: 256,
+            });
+          } else {
+            avatarUrl = discordAvatarUrl(request.userId, discriminator, {
+              avatar: typeof userAvatarRaw === "bigint" ? userAvatarRaw : undefined,
+              size: 256,
+            });
+          }
           isBot = typeof botRaw === "boolean" ? botRaw : false;
         }
         return {
@@ -430,6 +448,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
             ...(typeof nickRaw === "string" ? { nick: nickRaw } : {}),
             ...(username === undefined ? {} : { username }),
             ...(globalName === undefined ? {} : { globalName }),
+            ...(avatarUrl === undefined ? {} : { avatarUrl }),
           },
         };
       } catch (error) {

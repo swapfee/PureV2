@@ -253,6 +253,7 @@ export interface DiscordApiPort {
       readonly nick?: string;
       readonly username?: string;
       readonly globalName?: string;
+      readonly avatarUrl?: string;
       readonly bot: boolean;
     }>
   >;

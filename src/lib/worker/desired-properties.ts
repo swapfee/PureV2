@@ -19,6 +19,8 @@ export const workerDesiredProperties = {
     id: true,
     username: true,
     globalName: true,
+    discriminator: true,
+    avatar: true,
     bot: true,
   },
   member: {
@@ -27,6 +29,7 @@ export const workerDesiredProperties = {
     guildId: true,
     permissions: true,
     nick: true,
+    avatar: true,
   },
   channel: {
     id: true,
