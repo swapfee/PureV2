@@ -16,6 +16,21 @@ import { CreationReservationModel } from "../models/creation-reservation.ts";
 import { GuildConfigModel } from "../models/guild-config.ts";
 import { OwnerBlockListModel } from "../models/owner-block-list.ts";
 import { TemporaryChannelModel } from "../models/temporary-channel.ts";
+import { VoiceDailyStatsModel } from "../models/voice-daily-stats.ts";
+import { VoiceMemberStatsModel } from "../models/voice-member-stats.ts";
+import { VoiceStatsEventModel } from "../models/voice-stats-event.ts";
+import { VoiceStatsSessionModel } from "../models/voice-stats-session.ts";
+
+export const INDEX_APPLY_MODEL_NAMES = [
+  "GuildConfig",
+  "TemporaryChannel",
+  "CreationReservation",
+  "OwnerBlockList",
+  "VoiceStatsSession",
+  "VoiceMemberStats",
+  "VoiceDailyStats",
+  "VoiceStatsEvent",
+] as const;
 
 async function createMissingIndex(
   modelName: string,
@@ -56,6 +71,18 @@ async function createMissingIndex(
       return;
     case "OwnerBlockList":
       await OwnerBlockListModel.collection.createIndex(keyDoc, createOptions);
+      return;
+    case "VoiceStatsSession":
+      await VoiceStatsSessionModel.collection.createIndex(keyDoc, createOptions);
+      return;
+    case "VoiceMemberStats":
+      await VoiceMemberStatsModel.collection.createIndex(keyDoc, createOptions);
+      return;
+    case "VoiceDailyStats":
+      await VoiceDailyStatsModel.collection.createIndex(keyDoc, createOptions);
+      return;
+    case "VoiceStatsEvent":
+      await VoiceStatsEventModel.collection.createIndex(keyDoc, createOptions);
       return;
     default:
       throw new Error(`Unknown model ${modelName}`);

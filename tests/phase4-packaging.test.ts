@@ -24,6 +24,8 @@ import {
 import { registerGracefulShutdown } from "../index.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { CommandModule } from "../src/handlers/types.ts";
+import { INDEX_APPLY_MODEL_NAMES } from "../src/cli/indexes.ts";
+import { MODEL_COLLECTIONS } from "../src/lib/j2c/index-plan.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -175,6 +177,12 @@ describe("Docker packaging artifacts", () => {
 });
 
 describe("index maintenance CLI gates", () => {
+  test("every required index model has a collection and apply target", () => {
+    const requiredModels = Object.keys(REQUIRED_J2C_INDEX_SPECS).toSorted();
+    expect(Object.keys(MODEL_COLLECTIONS).toSorted()).toEqual(requiredModels);
+    expect(INDEX_APPLY_MODEL_NAMES.map(String).toSorted()).toEqual(requiredModels);
+  });
+
   test("default parse is dry-run", () => {
     const args = parseIndexCliArgs([]);
     expect(args.apply).toBe(false);
