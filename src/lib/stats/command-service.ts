@@ -1,7 +1,7 @@
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
-import type { TemporaryChannelRepository } from "../j2c/repositories.ts";
+import { failureResponse, successResponse } from "../j2c/action-response.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
 import type { VoiceStatsCardRenderer } from "./card-renderer.ts";
 import type { VoiceStatsService } from "./service.ts";
@@ -16,7 +16,6 @@ function memberOption(interaction: InteractionCreatePayload): string | undefined
 
 export function createStatsCommandService(options: {
   readonly stats: VoiceStatsService;
-  readonly channels: TemporaryChannelRepository;
   readonly discord: DiscordApiPort;
   readonly renderer: VoiceStatsCardRenderer;
   readonly cooldowns: CooldownStore;
@@ -68,16 +67,21 @@ export function createStatsCommandService(options: {
   return {
     async execute(interaction) {
       if (!interaction.guildId) {
-        await options.discord.respondToInteraction({ interactionId: interaction.id, interactionToken: interaction.token, content: "Statistics are only available in a server.", ephemeral: true });
+        await options.discord.respondToInteraction({
+          interactionId: interaction.id,
+          interactionToken: interaction.token,
+          embeds: failureResponse("Statistics are only available in a server.").embeds,
+          ephemeral: true,
+        });
         return;
       }
       await options.discord.deferInteraction({ interactionId: interaction.id, interactionToken: interaction.token, ephemeral: true });
-      const fail = async (content: string): Promise<void> => options.discord.editInteractionResponse({ applicationId: interaction.applicationId, interactionToken: interaction.token, content });
+      const fail = async (message: string): Promise<void> => options.discord.editInteractionResponse({
+        applicationId: interaction.applicationId,
+        interactionToken: interaction.token,
+        embeds: failureResponse(message).embeds,
+      });
       if (!options.stats.isReady()) { await fail("Voice statistics are still warming up. Please try again shortly."); return; }
-      const voice = await options.discord.getUserVoiceChannel({ guildId: interaction.guildId, userId: interaction.userId });
-      if (voice.kind !== "found" || !voice.value.channelId) { await fail("You must be connected to a managed voice channel to view statistics."); return; }
-      const managed = await options.channels.findByChannelId(voice.value.channelId);
-      if (!managed || managed.guildId !== interaction.guildId || managed.status !== "active") { await fail("You must be connected to a managed voice channel to view statistics."); return; }
       const remaining = options.cooldowns.remaining(`stat:${interaction.guildId}:${interaction.userId}`);
       if (remaining > 0) { await fail(`Please wait ${Math.ceil(remaining / 1_000)} seconds before generating another statistics card.`); return; }
       options.cooldowns.check(`stat:${interaction.guildId}:${interaction.userId}`, COOLDOWN_MS);
@@ -95,6 +99,7 @@ export function createStatsCommandService(options: {
           applicationId: interaction.applicationId,
           interactionToken: interaction.token,
           requestId: `stat:${interaction.id}:render`,
+          embeds: successResponse("Voice statistics generated.").embeds,
           files: [{ name: "voice-stats.png", contentType: "image/png", data: png }],
         });
       } catch (error) {

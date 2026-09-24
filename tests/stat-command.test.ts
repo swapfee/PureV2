@@ -33,7 +33,7 @@ async function fixture(renderer: { render(snapshot: VoiceStatsSnapshot): Promise
     getSnapshot: async (_guild, user, name) => ({ ...snapshot, userId: user, displayName: name }),
   };
   const service = createStatsCommandService({
-    stats, channels, discord: fake.discord,
+    stats, discord: fake.discord,
     renderer,
     cooldowns: createCooldownStore({ maxEntries: 10 }),
     metrics: createVoiceStatsMetrics(),
@@ -50,16 +50,18 @@ describe("/stat command", () => {
   test("rejects DMs before deferring", async () => {
     const fx = await fixture();
     await fx.service.execute(interaction({ guildId: undefined }));
-    expect(fx.controls.responses[0]?.content).toContain("only available in a server");
+    expect(fx.controls.responses[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> Statistics are only available in a server.");
+    expect(fx.controls.responses[0]?.embeds?.[0]?.color).toBeUndefined();
     expect(fx.controls.deferredInteractions).toHaveLength(0);
   });
 
-  test("requires the caller to be in an active managed channel", async () => {
+  test("allows the caller to view statistics while outside a managed channel", async () => {
     const fx = await fixture();
     fx.controls.voiceByUser.set(`${guildId}:${callerId}`, null);
     await fx.service.execute(interaction());
     expect(fx.controls.deferredInteractions).toEqual(["interaction-1"]);
-    expect(fx.controls.editedInteractions[0]?.content).toContain("managed voice channel");
+    expect(fx.controls.editedInteractions[0]?.files?.[0]?.name).toBe("voice-stats.png");
+    expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:success:1543407529302949908> Voice statistics generated.");
   });
 
   test("defaults to self and supports another human guild member with a private PNG", async () => {
@@ -68,30 +70,32 @@ describe("/stat command", () => {
     const response = fx.controls.editedInteractions[0];
     expect(response?.files?.[0]?.name).toBe("voice-stats.png");
     expect(response?.requestId).toBe("stat:interaction-1:render");
+    expect(response?.embeds?.[0]?.description).toContain("<:success:1543407529302949908> Voice statistics generated.");
+    expect(response?.embeds?.[0]?.color).toBeUndefined();
   });
 
   test("rejects bot targets", async () => {
     const fx = await fixture();
     fx.controls.members.set(`${guildId}:${targetId}`, { id: targetId, bot: true, username: "Bot" });
     await fx.service.execute(interaction({ options: [{ name: "member", type: 6, value: targetId }] }));
-    expect(fx.controls.editedInteractions[0]?.content).toContain("Bot accounts");
+    expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> Bot accounts");
   });
 
   test("rejects missing targets and rate limits repeated renders", async () => {
     const fx = await fixture();
     await fx.service.execute(interaction({ id: "missing", options: [{ name: "member", type: 6, value: "987654321098765432" }] }));
-    expect(fx.controls.editedInteractions[0]?.content).toContain("could not be found");
+    expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> That member could not be found");
     const fresh = await fixture();
     await fresh.service.execute(interaction({ id: "first" }));
     await fresh.service.execute(interaction({ id: "second" }));
-    expect(fresh.controls.editedInteractions[1]?.content).toContain("Please wait");
+    expect(fresh.controls.editedInteractions[1]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> Please wait");
   });
 
   test("returns a safe private failure when rendering fails", async () => {
     const fx = await fixture({ render: async () => { throw new Error("renderer-secret-detail"); } });
     await fx.service.execute(interaction());
     expect(fx.controls.deferredInteractions).toEqual(["interaction-1"]);
-    expect(fx.controls.editedInteractions[0]?.content).toContain("could not be generated");
-    expect(fx.controls.editedInteractions[0]?.content).not.toContain("renderer-secret-detail");
+    expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> The statistics card could not be generated");
+    expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).not.toContain("renderer-secret-detail");
   });
 });

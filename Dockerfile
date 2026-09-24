@@ -2,7 +2,12 @@
 # Build: docker build -t purev2:local .
 # Run via compose.yaml (do not publish REST proxy port 8081).
 
-FROM oven/bun:1.4.2-debian AS deps
+FROM oven/bun:1.4.2-debian AS runtime-base
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-base AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
@@ -18,7 +23,7 @@ RUN bun run typecheck
 RUN bun run lint
 RUN bun test
 
-FROM oven/bun:1.4.2-debian AS production
+FROM runtime-base AS production
 WORKDIR /app
 
 # Dedicated non-root user

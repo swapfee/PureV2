@@ -148,7 +148,6 @@ export async function runWorkerMain(): Promise<void> {
 
   const statsCommand = createStatsCommandService({
     stats,
-    channels: channelsRepo,
     discord,
     renderer: createVoiceStatsCardRenderer(),
     cooldowns: createCooldownStore({ maxEntries: 2_000 }),

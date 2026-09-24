@@ -135,6 +135,7 @@ describe("Docker packaging artifacts", () => {
   test("Dockerfile pins Bun 1.4.2, non-root, healthcheck, no REST EXPOSE", () => {
     const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
     expect(dockerfile).toContain("oven/bun:1.4.2");
+    expect(dockerfile).toContain("fonts-dejavu-core");
     expect(dockerfile).not.toContain(":latest");
     expect(dockerfile).toContain("--frozen-lockfile");
     expect(dockerfile).toContain("bun run typecheck");

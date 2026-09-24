@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 
-import { createVoiceStatsCardRenderer, STATS_CARD_HEIGHT, STATS_CARD_WIDTH } from "../src/lib/stats/card-renderer.ts";
+import { createVoiceStatsCardRenderer, resolveStatsFontFamily, STATS_CARD_HEIGHT, STATS_CARD_WIDTH } from "../src/lib/stats/card-renderer.ts";
+
+test("voice stats renderer resolves an installed font instead of silently drawing blank text", () => {
+  expect(resolveStatsFontFamily().length).toBeGreaterThan(0);
+});
 
 test("voice stats renderer creates a 1600x900 PNG", async () => {
   const png = await createVoiceStatsCardRenderer().render({
