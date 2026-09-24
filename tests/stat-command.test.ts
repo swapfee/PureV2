@@ -85,6 +85,12 @@ describe("/stat command", () => {
       username: "target.username",
       avatarUrl: "https://cdn.discordapp.com/avatars/345678901234567890/hash.webp?size=256",
     });
+    fx.controls.guilds.set(guildId, {
+      id: guildId,
+      name: "Pure Development",
+      premiumTier: 0,
+      features: [],
+    });
     const avatar = new Uint8Array([1, 2, 3]);
     const service = createStatsCommandService({
       stats: {
@@ -102,6 +108,7 @@ describe("/stat command", () => {
     await service.execute(interaction({ options: [{ name: "member", type: 6, value: targetId }] }));
     expect(card?.displayName).toBe("Display Name");
     expect(card?.username).toBe("target.username");
+    expect(card?.serverName).toBe("Pure Development");
     expect(card?.avatarData).toBe(avatar);
   });
 

@@ -95,6 +95,10 @@ export function createStatsCommandService(options: {
       const displayName = target.value.nick ?? target.value.globalName ?? target.value.username ?? `Member ${targetUserId.slice(-4)}`;
       try {
         const snapshot = await options.stats.getSnapshot(interaction.guildId, targetUserId, displayName);
+        const guild = await options.discord.getGuild({ guildId: interaction.guildId });
+        const serverName = guild.kind === "found" && guild.value.name
+          ? guild.value.name
+          : "Discord Server";
         let avatarData: Uint8Array | undefined;
         if (target.value.avatarUrl) {
           try {
@@ -111,6 +115,7 @@ export function createStatsCommandService(options: {
         const png = await render(`${interaction.guildId}:${targetUserId}`, () => options.renderer.render({
           ...snapshot,
           username,
+          serverName,
           ...(avatarData ? { avatarData } : {}),
         }));
         if (png.byteLength > MAX_PNG_BYTES) throw new Error("rendered_png_too_large");

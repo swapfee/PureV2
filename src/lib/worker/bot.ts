@@ -311,6 +311,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       try {
         const guild = await bot.rest.makeRequest<{
           id: string | number | bigint;
+          name?: string;
           premium_tier?: number;
           features?: string[];
         }>("GET", bot.rest.routes.guilds.guild(request.guildId));
@@ -318,6 +319,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           kind: "found" as const,
           value: {
             id: String(guild.id),
+            ...(typeof guild.name === "string" ? { name: guild.name } : {}),
             premiumTier: typeof guild.premium_tier === "number" ? guild.premium_tier : 0,
             features: Array.isArray(guild.features) ? guild.features : [],
           },
@@ -431,11 +433,13 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
             avatarUrl = discordMemberAvatarUrl(request.guildId, request.userId, {
               avatar: memberAvatarRaw,
               size: 256,
+              format: "png",
             });
           } else {
             avatarUrl = discordAvatarUrl(request.userId, discriminator, {
               avatar: typeof userAvatarRaw === "bigint" ? userAvatarRaw : undefined,
               size: 256,
+              format: "png",
             });
           }
           isBot = typeof botRaw === "boolean" ? botRaw : false;

@@ -129,6 +129,7 @@ export interface DiscordChannelDetails {
 
 export interface DiscordGuildDetails {
   readonly id: string;
+  readonly name?: string;
   readonly premiumTier: number;
   readonly features: readonly string[];
 }

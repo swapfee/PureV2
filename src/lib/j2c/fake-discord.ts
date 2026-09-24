@@ -26,6 +26,7 @@ export interface FakeDiscordChannel {
 
 export interface FakeDiscordGuild {
   id: string;
+  name?: string;
   premiumTier: number;
   features: string[];
 }
@@ -329,6 +330,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         kind: "found",
         value: {
           id: guild.id,
+          ...(guild.name === undefined ? {} : { name: guild.name }),
           premiumTier: guild.premiumTier,
           features: [...guild.features],
         },
