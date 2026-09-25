@@ -17,8 +17,10 @@ import {
   createMongooseTemporaryChannelRepository,
 } from "../j2c/mongoose-repositories.ts";
 import { createRestManagerDiscordPort } from "../j2c/rest-discord-port.ts";
+import type { GuildConfigRepository, TemporaryChannelRepository } from "../j2c/repositories.ts";
 import { createJ2cRuntime, type J2cRuntime } from "../j2c/runtime.ts";
 import { createLogger, type Logger } from "../logger.ts";
+import { createDashboardControlApi, type DashboardControlApi } from "./dashboard-api.ts";
 import { createCoordinatorGateway } from "./gateway.ts";
 import {
   allComponentsHealthy,
@@ -124,7 +126,12 @@ export function createCoordinatorRuntime(
     service: "purev2",
     role: "coordinator",
     level: config.LOG_LEVEL,
-    sensitiveValues: [config.DISCORD_TOKEN, config.REST_PROXY_AUTHORIZATION, config.MONGODB_URI],
+    sensitiveValues: [
+      config.DISCORD_TOKEN,
+      config.REST_PROXY_AUTHORIZATION,
+      config.MONGODB_URI,
+      config.DASHBOARD_API_AUTHORIZATION ?? "",
+    ],
   }),
 ): CoordinatorRuntime {
   const metrics = createCoordinatorMetrics();
@@ -134,6 +141,7 @@ export function createCoordinatorRuntime(
   let shuttingDown = false;
   let serviceReady = false;
   let j2cRuntime: J2cRuntime | undefined;
+  let dashboardApi: DashboardControlApi | undefined;
   let voiceSequence = 0;
 
   const rest = createCoordinatorRest({
@@ -292,6 +300,10 @@ export function createCoordinatorRuntime(
         await supervisor.waitUntilWorkersReady(config.SHUTDOWN_TIMEOUT_MS);
       }
 
+      let configs: GuildConfigRepository;
+      let channels: TemporaryChannelRepository;
+      const discord = createRestManagerDiscordPort(rest.rest);
+
       if (config.NODE_ENV === "test") {
         const {
           createMemoryCreationReservationRepository,
@@ -299,12 +311,14 @@ export function createCoordinatorRuntime(
           createMemoryOwnerBlockListRepository,
           createMemoryTemporaryChannelRepository,
         } = await import("../j2c/memory-repositories.ts");
+        configs = createMemoryGuildConfigRepository();
+        channels = createMemoryTemporaryChannelRepository();
         j2cRuntime = createJ2cRuntime({
-          configs: createMemoryGuildConfigRepository(),
-          channels: createMemoryTemporaryChannelRepository(),
+          configs,
+          channels,
           reservations: createMemoryCreationReservationRepository(),
           blocks: createMemoryOwnerBlockListRepository(),
-          discord: createRestManagerDiscordPort(rest.rest),
+          discord,
           logger: logger.child({ component: "j2c" }),
           metrics: j2cMetrics,
           reconcileConcurrency: 4,
@@ -313,12 +327,14 @@ export function createCoordinatorRuntime(
         j2cRuntime.markIndexesVerified(true);
         await j2cRuntime.reconcileDatabaseRest();
       } else {
+        configs = createMongooseGuildConfigRepository();
+        channels = createMongooseTemporaryChannelRepository();
         j2cRuntime = createJ2cRuntime({
-          configs: createMongooseGuildConfigRepository(),
-          channels: createMongooseTemporaryChannelRepository(),
+          configs,
+          channels,
           reservations: createMongooseCreationReservationRepository(),
           blocks: createMongooseOwnerBlockListRepository(),
-          discord: createRestManagerDiscordPort(rest.rest),
+          discord,
           logger: logger.child({ component: "j2c" }),
           metrics: j2cMetrics,
           reconcileConcurrency: 4,
@@ -326,6 +342,23 @@ export function createCoordinatorRuntime(
         j2cRuntime.markModelsInitialized();
         j2cRuntime.markIndexesVerified(true);
         await j2cRuntime.reconcileDatabaseRest();
+      }
+
+      if (config.DASHBOARD_API_AUTHORIZATION !== undefined) {
+        dashboardApi = createDashboardControlApi({
+          host: config.DASHBOARD_API_HOST,
+          port: config.DASHBOARD_API_PORT,
+          authorization: config.DASHBOARD_API_AUTHORIZATION,
+          bodyLimitBytes: config.DASHBOARD_API_BODY_LIMIT_BYTES,
+          configs,
+          channels,
+          discord,
+          logger: logger.child({ component: "dashboardApi" }),
+          isReady: () => serviceReady,
+        });
+        await dashboardApi.start();
+      } else {
+        logger.info("Dashboard control API disabled");
       }
 
       logger.info("Join-to-Create database/REST reconciliation finished", {
@@ -403,6 +436,7 @@ export function createCoordinatorRuntime(
       logger.info("Coordinator started", {
         healthUrl: health.url,
         restProxyUrl: rest.baseUrl,
+        dashboardApiEnabled: dashboardApi?.isListening() ?? false,
         recommendedShards: gateway.recommendedShardCount(),
         j2cReady: j2cRuntime.readiness().ready,
       });
@@ -415,6 +449,7 @@ export function createCoordinatorRuntime(
       logger.info("Coordinator stopping", { reason });
 
       await health.stop();
+      await dashboardApi?.stop();
       await gateway.stop(1_000, reason);
       await supervisor.stop(reason);
       await rest.stop();

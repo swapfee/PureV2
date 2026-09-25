@@ -31,6 +31,9 @@ describe("parseCoordinatorConfig", () => {
     expect(config.HEALTH_HOST).toBe("127.0.0.1");
     expect(config.HEALTH_PORT).toBe(3000);
     expect(config.REST_PROXY_PORT).toBe(8081);
+    expect(config.DASHBOARD_API_HOST).toBe("127.0.0.1");
+    expect(config.DASHBOARD_API_PORT).toBe(8082);
+    expect(config.DASHBOARD_API_AUTHORIZATION).toBeUndefined();
     expect(config.MONGODB_MAX_POOL_SIZE).toBe(3);
     expect(config.WORKER_EVENT_MAX_ATTEMPTS).toBe(3);
     expect(restProxyBaseUrl(config)).toBe("http://127.0.0.1:8081");
@@ -66,6 +69,19 @@ describe("parseCoordinatorConfig", () => {
     expect(() => parseCoordinatorConfig({ ...baseCoordinator, REST_PROXY_PORT: "70000" })).toThrow(
       /REST_PROXY_PORT/,
     );
+  });
+
+  test("accepts a private Docker dashboard binding and rejects a weak secret", () => {
+    const config = parseCoordinatorConfig({
+      ...baseCoordinator,
+      DASHBOARD_API_HOST: "0.0.0.0",
+      DASHBOARD_API_AUTHORIZATION: "0123456789abcdef0123456789abcdef",
+    });
+    expect(config.DASHBOARD_API_HOST).toBe("0.0.0.0");
+    expect(() => parseCoordinatorConfig({
+      ...baseCoordinator,
+      DASHBOARD_API_AUTHORIZATION: "too-short",
+    })).toThrow(/DASHBOARD_API_AUTHORIZATION/);
   });
 
   test("rejects invalid heartbeat relationship", () => {
@@ -116,6 +132,7 @@ describe("buildWorkerProcessEnv", () => {
     const config = parseCoordinatorConfig(baseCoordinator);
     const env = buildWorkerProcessEnv(config, 0, "http://127.0.0.1:8081");
     expect(env.DISCORD_TOKEN).toBeUndefined();
+    expect(env.DASHBOARD_API_AUTHORIZATION).toBeUndefined();
     expect(Object.keys(env).includes("DISCORD_TOKEN")).toBe(false);
     expect(env.DISCORD_APPLICATION_ID).toBe(config.DISCORD_APPLICATION_ID);
     expect(env.PUREV2_REST_PROXY_BASE_URL).toBe("http://127.0.0.1:8081");

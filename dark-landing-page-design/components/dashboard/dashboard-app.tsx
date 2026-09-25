@@ -37,6 +37,7 @@ import type {
   JoinToCreateConfiguration,
   ManagedVoiceChannel,
 } from "@/lib/dashboard/contracts"
+import { dashboardSnapshotSchema } from "@/lib/dashboard/contracts"
 import { cn } from "@/lib/utils"
 
 const NAVIGATION: readonly { id: DashboardSection; label: string; icon: typeof LayoutDashboard }[] = [
@@ -58,6 +59,7 @@ const DASHBOARD_NOTIFICATIONS = [
 ]
 
 export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSnapshot }) {
+  const [snapshot, setSnapshot] = useState(initialSnapshot)
   const [activeSection, setActiveSection] = useState<DashboardSection>("overview")
   const [mobileOpen, setMobileOpen] = useState(false)
   const [selectedGuildId, setSelectedGuildId] = useState(initialSnapshot.guild.id)
@@ -65,10 +67,12 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
   const [savedConfiguration, setSavedConfiguration] = useState(initialSnapshot.configuration)
   const [showSavedToast, setShowSavedToast] = useState(false)
   const [savedToastExiting, setSavedToastExiting] = useState(false)
+  const [saveError, setSaveError] = useState<string | undefined>(undefined)
+  const [saving, setSaving] = useState(false)
   const toastExitTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const toastRemoveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const dirty = JSON.stringify(configuration) !== JSON.stringify(savedConfiguration)
-  const selectedGuild = initialSnapshot.guilds.find((guild) => guild.id === selectedGuildId) ?? initialSnapshot.guild
+  const selectedGuild = snapshot.guilds.find((guild) => guild.id === selectedGuildId) ?? snapshot.guild
 
   useEffect(() => () => {
     if (toastExitTimeout.current !== undefined) clearTimeout(toastExitTimeout.current)
@@ -80,10 +84,8 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     setMobileOpen(false)
   }
 
-  function commitConfiguration() {
-    if (!dirty) return
-
-    setSavedConfiguration(configuration)
+  function showSaveToast(error?: string) {
+    setSaveError(error)
     setShowSavedToast(true)
     setSavedToastExiting(false)
 
@@ -97,36 +99,95 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     }, SAVED_TOAST_VISIBLE_MS + SAVED_TOAST_EXIT_MS)
   }
 
+  async function commitConfiguration() {
+    if (!dirty || saving) return
+    const submittedConfiguration = configuration
+    const update = {
+      ...(configuration.enabled === savedConfiguration.enabled ? {} : { enabled: configuration.enabled }),
+      ...(configuration.lobbyChannelName === savedConfiguration.lobbyChannelName ? {} : { lobbyChannelName: configuration.lobbyChannelName }),
+      ...(configuration.categoryName === savedConfiguration.categoryName ? {} : { categoryName: configuration.categoryName }),
+      ...(configuration.channelNameTemplate === savedConfiguration.channelNameTemplate ? {} : { channelNameTemplate: configuration.channelNameTemplate }),
+      ...(configuration.defaultUserLimit === savedConfiguration.defaultUserLimit ? {} : { defaultUserLimit: configuration.defaultUserLimit }),
+      ...(configuration.ownerCanEdit === savedConfiguration.ownerCanEdit ? {} : { ownerCanEdit: configuration.ownerCanEdit }),
+    }
+    if (Object.keys(update).length === 0) return
+    setSaving(true)
+    try {
+      const response = await fetch(`/api/dashboard/guilds/${selectedGuildId}/config`, {
+        method: "PUT",
+        headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID() },
+        body: JSON.stringify(update),
+      })
+      const result = zDashboardResponse(await response.json())
+      if (!response.ok || !result.snapshot) throw new Error(result.error ?? "Unable to save settings")
+      const updatedSnapshot = result.snapshot
+      setSnapshot(updatedSnapshot)
+      setConfiguration((current) => JSON.stringify(current) === JSON.stringify(submittedConfiguration)
+        ? updatedSnapshot.configuration
+        : current)
+      setSavedConfiguration(updatedSnapshot.configuration)
+      showSaveToast()
+    } catch (error) {
+      showSaveToast(error instanceof Error ? error.message : "Unable to save settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function changeGuild(guildId: string) {
+    if (guildId === selectedGuildId) return
+    const response = await fetch(`/api/dashboard/guilds/${guildId}/snapshot`, { cache: "no-store" })
+    const result = zDashboardResponse(await response.json())
+    if (!response.ok || !result.snapshot) {
+      showSaveToast(result.error ?? "Unable to load server")
+      return
+    }
+    setSelectedGuildId(guildId)
+    setSnapshot(result.snapshot)
+    setConfiguration(result.snapshot.configuration)
+    setSavedConfiguration(result.snapshot.configuration)
+  }
+
   return (
     <div className="min-h-screen bg-[#070707] text-foreground">
       <div aria-hidden className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_78%_-10%,rgba(255,255,255,0.08),transparent_28%)]" />
       <DashboardSidebar
         activeSection={activeSection}
-        guilds={initialSnapshot.guilds}
+        guilds={snapshot.guilds}
         mobileOpen={mobileOpen}
         onClose={() => setMobileOpen(false)}
-        onGuildChange={setSelectedGuildId}
+        onGuildChange={(guildId) => void changeGuild(guildId)}
         onNavigate={navigate}
         selectedGuildId={selectedGuild.id}
       />
 
       <div className="relative min-h-screen lg:pl-[264px]">
-        <DashboardHeader guildName={selectedGuild.name} onMenu={() => setMobileOpen(true)} onNavigate={navigate} />
+        <DashboardHeader guildName={selectedGuild.name} onMenu={() => setMobileOpen(true)} onNavigate={navigate} viewer={snapshot.viewer} />
 
         <main className="mx-auto max-w-[1500px] px-4 pb-16 pt-7 sm:px-7 lg:px-10">
-          {activeSection === "overview" && <Overview snapshot={initialSnapshot} onNavigate={navigate} />}
+          {activeSection === "overview" && <Overview snapshot={snapshot} onNavigate={navigate} />}
           {activeSection === "join-to-create" && (
-            <JoinToCreateSettings configuration={configuration} onChange={setConfiguration} onCommit={commitConfiguration} />
+            <JoinToCreateSettings configuration={configuration} onChange={setConfiguration} onCommit={() => void commitConfiguration()} />
           )}
-          {activeSection === "channels" && <ChannelDirectory channels={initialSnapshot.channels} />}
+          {activeSection === "channels" && <ChannelDirectory channels={snapshot.channels} />}
           {activeSection === "members" && <MemberAccessPreview />}
-          {activeSection === "statistics" && <StatisticsPanel snapshot={initialSnapshot} expanded />}
+          {activeSection === "statistics" && <StatisticsPanel snapshot={snapshot} expanded />}
           {activeSection === "settings" && <ServerSettings />}
         </main>
       </div>
-      <SavedToast exiting={savedToastExiting} visible={showSavedToast} />
+      <SavedToast error={saveError} exiting={savedToastExiting} visible={showSavedToast} />
     </div>
   )
+}
+
+function zDashboardResponse(value: unknown): { snapshot?: DashboardSnapshot; error?: string } {
+  if (typeof value !== "object" || value === null) return {}
+  const snapshot = dashboardSnapshotSchema.safeParse(Reflect.get(value, "snapshot"))
+  const error = Reflect.get(value, "error")
+  return {
+    ...(snapshot.success ? { snapshot: snapshot.data } : {}),
+    ...(typeof error === "string" ? { error } : {}),
+  }
 }
 
 function DashboardSidebar({
@@ -240,10 +301,11 @@ function DashboardSidebar({
   )
 }
 
-function DashboardHeader({ guildName, onMenu, onNavigate }: {
+function DashboardHeader({ guildName, onMenu, onNavigate, viewer }: {
   guildName: string
   onMenu: () => void
   onNavigate: (section: DashboardSection) => void
+  viewer: DashboardSnapshot["viewer"]
 }) {
   const { menuRootRef, openMenu, setOpenMenu } = useDismissibleMenu<"help" | "notifications" | "profile">()
   const [readNotificationIds, setReadNotificationIds] = useState<ReadonlySet<string>>(() => new Set())
@@ -271,7 +333,7 @@ function DashboardHeader({ guildName, onMenu, onNavigate }: {
       <div className="relative flex items-center gap-2" ref={menuRootRef}>
         <button aria-expanded={openMenu === "help"} aria-haspopup="menu" className={headerButtonClass(openMenu === "help")} onClick={() => setOpenMenu((current) => current === "help" ? null : "help")} aria-label="Help"><CircleHelp className="size-4" /></button>
         <button aria-expanded={openMenu === "notifications"} aria-haspopup="menu" className={cn(headerButtonClass(openMenu === "notifications"), "relative")} onClick={() => setOpenMenu((current) => current === "notifications" ? null : "notifications")} aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ""}`}><Bell className="size-4" />{unreadCount > 0 && <span className="absolute right-2 top-2 size-1.5 rounded-full bg-white" />}</button>
-        <button aria-expanded={openMenu === "profile"} aria-haspopup="menu" className={cn("ml-1 flex size-9 items-center justify-center rounded-full border text-xs font-semibold transition", openMenu === "profile" ? "border-white bg-white text-black" : "border-white/15 bg-white/[0.06] hover:bg-white/[0.12]")} onClick={() => setOpenMenu((current) => current === "profile" ? null : "profile")} aria-label="Open user profile">F</button>
+        <button aria-expanded={openMenu === "profile"} aria-haspopup="menu" className={cn("ml-1 flex size-9 items-center justify-center overflow-hidden rounded-full border text-xs font-semibold transition", openMenu === "profile" ? "border-white bg-white text-black" : "border-white/15 bg-white/[0.06] hover:bg-white/[0.12]")} onClick={() => setOpenMenu((current) => current === "profile" ? null : "profile")} aria-label="Open user profile">{viewer.avatarUrl ? <img alt="" className="size-full object-cover" src={viewer.avatarUrl} /> : viewer.displayName.slice(0, 1).toUpperCase()}</button>
 
         {openMenu === "help" && (
           <HeaderPopover align="right" label="Help menu" width="w-72">
@@ -307,12 +369,13 @@ function DashboardHeader({ guildName, onMenu, onNavigate }: {
         {openMenu === "profile" && (
           <HeaderPopover align="right" label="User profile menu" width="w-64">
             <div className="flex items-center gap-3 px-2.5 py-2.5">
-              <span className="flex size-10 items-center justify-center rounded-full bg-white text-sm font-semibold text-black">F</span>
-              <span className="min-w-0"><span className="block truncate text-sm font-medium">FonZ</span><span className="block truncate text-[10px] text-muted-foreground">@buystop</span></span>
+              <span className="flex size-10 items-center justify-center overflow-hidden rounded-full bg-white text-sm font-semibold text-black">{viewer.avatarUrl ? <img alt="" className="size-full object-cover" src={viewer.avatarUrl} /> : viewer.displayName.slice(0, 1).toUpperCase()}</span>
+              <span className="min-w-0"><span className="block truncate text-sm font-medium">{viewer.displayName}</span><span className="block truncate text-[10px] text-muted-foreground">@{viewer.username}</span></span>
             </div>
             <div className="my-1 border-t border-white/[0.08]" />
             <MenuAction icon={Settings} label="Server settings" detail={guildName} onClick={() => openSection("settings")} />
             <a className="flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition hover:bg-white/[0.06]" href="/"><ExternalLink className="size-4 text-muted-foreground" /><span className="flex-1 text-xs">Back to website</span><ChevronRight className="size-3 text-muted-foreground" /></a>
+            <form action="/api/auth/logout" method="post"><button className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left text-xs transition hover:bg-white/[0.06]" type="submit"><X className="size-4 text-muted-foreground" />Sign out</button></form>
           </HeaderPopover>
         )}
       </div>
@@ -378,7 +441,7 @@ function MenuAction({ detail, icon: Icon, label, onClick }: { detail: string; ic
   )
 }
 
-function SavedToast({ exiting, visible }: { exiting: boolean; visible: boolean }) {
+function SavedToast({ error, exiting, visible }: { error?: string; exiting: boolean; visible: boolean }) {
   if (!visible) return null
 
   return (
@@ -391,11 +454,11 @@ function SavedToast({ exiting, visible }: { exiting: boolean; visible: boolean }
       role="status"
     >
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-white text-black">
-        <CheckCircle2 className="size-4" />
+        {error ? <X className="size-4" /> : <CheckCircle2 className="size-4" />}
       </span>
       <div>
-        <div className="text-xs font-medium">Settings saved</div>
-        <div className="mt-0.5 text-[10px] text-muted-foreground">Your configuration is up to date.</div>
+        <div className="text-xs font-medium">{error ? "Settings not saved" : "Settings saved"}</div>
+        <div className="mt-0.5 max-w-72 text-[10px] text-muted-foreground">{error ?? "Your configuration is up to date."}</div>
       </div>
     </div>
   )
@@ -404,7 +467,7 @@ function SavedToast({ exiting, visible }: { exiting: boolean; visible: boolean }
 function Overview({ snapshot, onNavigate }: { snapshot: DashboardSnapshot; onNavigate: (section: DashboardSection) => void }) {
   return (
     <div className="space-y-7">
-      <PageHeading eyebrow="Overview" title="Good evening, FonZ." description="Here is what is happening across your managed voice channels." />
+      <PageHeading eyebrow="Overview" title={`Welcome, ${snapshot.viewer.displayName}.`} description="Here is what is happening across your managed voice channels." />
       <SummaryGrid snapshot={snapshot} />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.55fr)]">
         <StatisticsPanel snapshot={snapshot} />
@@ -453,7 +516,7 @@ function ChannelDirectory({ channels }: { channels: readonly ManagedVoiceChannel
 
 function JoinToCreateSettings({ configuration, onChange, onCommit }: { configuration: JoinToCreateConfiguration; onChange: (value: JoinToCreateConfiguration) => void; onCommit: () => void }) {
   const update = <Key extends keyof JoinToCreateConfiguration>(key: Key, value: JoinToCreateConfiguration[Key]) => onChange({ ...configuration, [key]: value })
-  return <div className="space-y-7"><PageHeading eyebrow="Configuration" title="Join to Create" description="Set the defaults that Pure applies whenever a member creates a new room."/><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"><section className="rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-7"><div className="flex items-center justify-between border-b border-white/[0.08] pb-5"><div><h2 className="text-sm font-medium">Core configuration</h2><p className="mt-1 text-[11px] text-muted-foreground">Changes save automatically when you leave a field.</p></div><Toggle checked={configuration.enabled} onBlur={onCommit} onChange={(value) => update("enabled", value)} label="System enabled"/></div><div className="mt-6 grid gap-5 sm:grid-cols-2"><Field label="Lobby channel" value={configuration.lobbyChannelName} onBlur={onCommit} onChange={(value) => update("lobbyChannelName", value)}/><Field label="Temporary category" value={configuration.categoryName} onBlur={onCommit} onChange={(value) => update("categoryName", value)}/><Field className="sm:col-span-2" label="Channel name template" value={configuration.channelNameTemplate} hint="Variables: {username}, {displayname}" onBlur={onCommit} onChange={(value) => update("channelNameTemplate", value)}/><Field label="Default user limit" value={String(configuration.defaultUserLimit)} hint="0 means unlimited" inputMode="numeric" onBlur={onCommit} onChange={(value) => update("defaultUserLimit", Math.min(99, Math.max(0, Number.parseInt(value || "0", 10) || 0)))}/></div><div className="mt-7 space-y-3 border-t border-white/[0.08] pt-6"><SettingToggle title="Owner channel editing" description="Let owners rename and configure their rooms." checked={configuration.ownerCanEdit} onBlur={onCommit} onChange={(value) => update("ownerCanEdit", value)}/><SettingToggle title="Voice control interface" description="Post the button interface inside each temporary room." checked={configuration.interfaceEnabled} onBlur={onCommit} onChange={(value) => update("interfaceEnabled", value)}/></div></section><ConfigurationPreview configuration={configuration}/></div></div>
+  return <div className="space-y-7"><PageHeading eyebrow="Configuration" title="Join to Create" description="Set the defaults that Pure applies whenever a member creates a new room."/><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]"><section className="rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-7"><div className="flex items-center justify-between border-b border-white/[0.08] pb-5"><div><h2 className="text-sm font-medium">Core configuration</h2><p className="mt-1 text-[11px] text-muted-foreground">Changes save automatically when you leave a field.</p></div><Toggle checked={configuration.enabled} onBlur={onCommit} onChange={(value) => update("enabled", value)} label="System enabled"/></div><div className="mt-6 grid gap-5 sm:grid-cols-2"><Field label="Lobby channel" value={configuration.lobbyChannelName} onBlur={onCommit} onChange={(value) => update("lobbyChannelName", value)}/><Field label="Temporary category" value={configuration.categoryName} onBlur={onCommit} onChange={(value) => update("categoryName", value)}/><Field className="sm:col-span-2" label="Channel name template" value={configuration.channelNameTemplate} hint="Variables: {username}, {displayname}" onBlur={onCommit} onChange={(value) => update("channelNameTemplate", value)}/><Field label="Default user limit" value={String(configuration.defaultUserLimit)} hint="0 means unlimited" inputMode="numeric" onBlur={onCommit} onChange={(value) => update("defaultUserLimit", Math.min(99, Math.max(0, Number.parseInt(value || "0", 10) || 0)))}/></div><div className="mt-7 space-y-3 border-t border-white/[0.08] pt-6"><SettingToggle title="Owner channel editing" description="Let owners rename and configure their rooms." checked={configuration.ownerCanEdit} onBlur={onCommit} onChange={(value) => update("ownerCanEdit", value)}/><div className="flex items-center justify-between gap-5 rounded-xl border border-white/[0.07] bg-black/40 p-4"><div><div className="text-xs font-medium">Voice control interface</div><div className="mt-1 text-[10px] text-muted-foreground">Managed through /setup interface for now.</div></div><span className="text-[10px] text-muted-foreground">{configuration.interfaceEnabled ? "Enabled" : "Disabled"}</span></div></div></section><ConfigurationPreview configuration={configuration}/></div></div>
 }
 
 function ConfigurationPreview({ configuration }: { configuration: JoinToCreateConfiguration }) {

@@ -49,6 +49,11 @@ export interface JoinToCreateConfiguration {
 }
 
 export interface DashboardSnapshot {
+  readonly viewer: {
+    readonly displayName: string
+    readonly username: string
+    readonly avatarUrl?: string
+  }
   readonly guild: DashboardGuild
   readonly guilds: readonly DashboardGuild[]
   readonly channels: readonly ManagedVoiceChannel[]
@@ -62,3 +67,34 @@ export interface DashboardSnapshot {
     readonly averageSessionMinutes: number
   }
 }
+
+export const dashboardSnapshotSchema = z.object({
+  viewer: z.object({ displayName: z.string(), username: z.string(), avatarUrl: z.string().optional() }),
+  guild: z.object({
+    id: z.string(), name: z.string(), initials: z.string(), memberCount: z.number(),
+    iconTone: z.enum(["light", "muted", "dark"]),
+  }),
+  guilds: z.array(z.object({
+    id: z.string(), name: z.string(), initials: z.string(), memberCount: z.number(),
+    iconTone: z.enum(["light", "muted", "dark"]),
+  })),
+  channels: z.array(z.object({
+    id: z.string(), name: z.string(), ownerName: z.string(), memberCount: z.number(),
+    userLimit: z.number(), locked: z.boolean(), hidden: z.boolean(), createdMinutesAgo: z.number(),
+  })),
+  activity: z.array(z.object({
+    id: z.string(), title: z.string(), detail: z.string(), occurredAt: z.string(),
+    kind: z.enum(["created", "updated", "deleted", "member"]),
+  })),
+  voiceActivity: z.array(z.object({ label: z.string(), minutes: z.number() })),
+  configuration: z.object({
+    enabled: z.boolean(), lobbyChannelName: z.string(), categoryName: z.string(),
+    channelNameTemplate: z.string(), defaultUserLimit: z.number(), ownerCanEdit: z.boolean(),
+    interfaceEnabled: z.boolean(),
+  }),
+  summary: z.object({
+    activeChannels: z.number(), connectedMembers: z.number(), channelsCreatedToday: z.number(),
+    averageSessionMinutes: z.number(),
+  }),
+})
+import { z } from "zod"

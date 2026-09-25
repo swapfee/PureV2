@@ -6,6 +6,7 @@ const projectRoot = dirname(fileURLToPath(import.meta.url))
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   agentRules: false,
+  output: 'standalone',
   allowedDevOrigins: ['127.0.0.1'],
   images: {
     unoptimized: true,

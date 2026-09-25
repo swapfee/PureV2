@@ -12,6 +12,8 @@
     "lint": "oxlint --type-aware --type-check --deny-warnings .",
     "test": "bun test",
     "check": "bun run typecheck && bun run lint && bun test",
+    "web:dev": "bun run --cwd dark-landing-page-design dev",
+    "web:check": "bun run --cwd dark-landing-page-design check",
     "docker:build": "docker build -t purev2:local .",
     "docker:config": "docker compose config",
     "docker:up": "docker compose up -d --build",

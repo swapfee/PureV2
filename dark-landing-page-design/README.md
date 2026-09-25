@@ -22,11 +22,14 @@ production Next.js build.
 - `app/` owns routes and server-rendered route entry points.
 - `components/` owns reusable landing-page and dashboard UI.
 - `lib/dashboard/contracts.ts` defines the data contract consumed by the UI.
-- `lib/dashboard/demo-data.ts` is an explicit, temporary demo provider.
+- `lib/dashboard/demo-data.ts` is used only for an unconfigured local preview.
+- `lib/auth/discord.ts` implements encrypted, HTTP-only Discord OAuth sessions.
+- `lib/dashboard/control-api.ts` is the server-only coordinator API adapter.
 
-The dashboard does not connect directly to Discord, MongoDB, Redis, or the bot's
-internal REST proxy. Its current Save action is a local interaction prototype and
-does not mutate server configuration.
+The dashboard does not connect directly to MongoDB, Redis, Discord Gateway, or the
+bot's worker REST proxy. Configuration saves are sent through an authenticated
+Next.js route to the private coordinator control API, which uses Discordeno's
+central REST manager for Discord mutations.
 
 ## Backend integration boundary
 

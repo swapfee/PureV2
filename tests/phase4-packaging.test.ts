@@ -151,7 +151,11 @@ describe("Docker packaging artifacts", () => {
     expect(compose).toContain("no-new-privileges");
     expect(compose).toContain("cap_drop");
     expect(compose).toContain("read_only: true");
-    expect(compose).toContain("env_file");
+    expect(compose).not.toContain("env_file");
+    expect(compose).toContain("DISCORD_TOKEN: ${DISCORD_TOKEN:");
+    expect(compose).toContain("PUREV2_CONTROL_API_URL: http://purev2:8082");
+    expect(compose).not.toMatch(/127\.0\.0\.1:808[12]:808[12]/);
+    expect(compose).toContain('127.0.0.1:3100:3100');
     const portsBlock = compose.match(/ports:\s*\n((?:\s+-[^\n]+\n?)+)/)?.[1] ?? "";
     expect(portsBlock).toContain("127.0.0.1:3000:3000");
     expect(portsBlock).not.toContain("8081");

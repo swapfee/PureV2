@@ -49,6 +49,14 @@ const restProxySchema = z.object({
   REST_REQUEST_CACHE_TTL_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(300_000),
 });
 
+/** Private coordinator API for the dashboard container; never publish this port. */
+const dashboardApiSchema = z.object({
+  DASHBOARD_API_HOST: healthHostSchema.default("127.0.0.1"),
+  DASHBOARD_API_PORT: z.coerce.number().int().min(1).max(65_535).default(8082),
+  DASHBOARD_API_AUTHORIZATION: z.string().min(32).optional(),
+  DASHBOARD_API_BODY_LIMIT_BYTES: z.coerce.number().int().min(1_024).max(1_048_576).default(32_768),
+});
+
 const workerLifecycleSchema = z.object({
   WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(250).max(60_000).default(5_000),
   WORKER_HEARTBEAT_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(15_000),
@@ -75,6 +83,7 @@ const coordinatorSchema = commonSchema
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   })
   .extend(restProxySchema.shape)
+  .extend(dashboardApiSchema.shape)
   .extend(workerLifecycleSchema.shape)
   .superRefine((value, context) => {
     if (value.WORKER_HEARTBEAT_TIMEOUT_MS <= value.WORKER_HEARTBEAT_INTERVAL_MS) {

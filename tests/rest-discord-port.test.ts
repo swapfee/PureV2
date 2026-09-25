@@ -111,6 +111,11 @@ describe("coordinator Discord REST port", () => {
       position: 5,
       requestId: "position-request",
     })).toEqual({ kind: "ok" });
+    expect(await discord.editChannel({
+      channelId: "channel",
+      name: "renamed room",
+      requestId: "dashboard-request",
+    })).toEqual({ kind: "ok" });
 
     expect(calls.some((call) =>
       call.method === "PUT" && call.route === "/channels/channel/permissions/member"
@@ -121,6 +126,10 @@ describe("coordinator Discord REST port", () => {
     expect(calls.some((call) =>
       call.method === "PATCH" && call.route === "/guilds/guild/channels" &&
       JSON.stringify(call.body) === JSON.stringify([{ id: "channel", position: 5 }])
+    )).toBe(true);
+    expect(calls.some((call) =>
+      call.method === "PATCH" && call.route === "/channels/channel" &&
+      JSON.stringify(call.body) === JSON.stringify({ name: "renamed room" })
     )).toBe(true);
   });
 });

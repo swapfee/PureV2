@@ -66,8 +66,30 @@ export function createRestManagerDiscordPort(rest: RestManager): DiscordApiPort 
       throw new Error("showModal is not available on the coordinator Discord port");
     },
 
-    async editChannel() {
-      throw new Error("editChannel is not available on the coordinator Discord port");
+    async editChannel(request) {
+      try {
+        await rest.makeRequest(
+          "PATCH",
+          rest.routes.channels.channel(request.channelId),
+          withReason(
+            {
+              body: {
+                ...(request.name === undefined ? {} : { name: request.name }),
+                ...(request.userLimit === undefined ? {} : { user_limit: request.userLimit }),
+                ...(request.bitrate === undefined ? {} : { bitrate: request.bitrate }),
+                ...(request.nsfw === undefined ? {} : { nsfw: request.nsfw }),
+                ...(request.rtcRegion === undefined ? {} : { rtc_region: request.rtcRegion }),
+                ...(request.parentId === undefined ? {} : { parent_id: request.parentId }),
+              },
+              headers: { [REST_REQUEST_ID_HEADER]: request.requestId },
+            },
+            request.reason,
+          ),
+        );
+        return { kind: "ok" };
+      } catch (error) {
+        return toDiscordOperationResult(error);
+      }
     },
 
     async setChannelVoiceStatus() {
