@@ -30,6 +30,7 @@ interface DiscordOAuthConfig {
   readonly clientSecret: string
   readonly redirectUri: string
   readonly sessionSecret: string
+  readonly secureCookies: boolean
 }
 
 interface SealedSession {
@@ -64,7 +65,12 @@ function readConfig(): DiscordOAuthConfig | undefined {
   const sessionSecret = process.env.DASHBOARD_SESSION_SECRET
   if (!clientId || !clientSecret || !redirectUri || !sessionSecret) return undefined
   if (sessionSecret.length < 32) throw new Error("DASHBOARD_SESSION_SECRET must be at least 32 characters")
-  return { clientId, clientSecret, redirectUri, sessionSecret }
+  const redirect = new URL(redirectUri)
+  const loopback = redirect.hostname === "127.0.0.1" || redirect.hostname === "localhost" || redirect.hostname === "[::1]"
+  if (redirect.protocol !== "https:" && !(redirect.protocol === "http:" && loopback)) {
+    throw new Error("DISCORD_OAUTH_REDIRECT_URI must use HTTPS unless it targets loopback")
+  }
+  return { clientId, clientSecret, redirectUri, sessionSecret, secureCookies: redirect.protocol === "https:" }
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -130,7 +136,7 @@ export async function createDiscordAuthorizationUrl(): Promise<string> {
   cookieStore.set(STATE_COOKIE, state, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: config.secureCookies,
     maxAge: 600,
     path: "/",
   })
@@ -171,7 +177,7 @@ export async function completeDiscordAuthorization(code: string, state: string):
   cookieStore.set(SESSION_COOKIE, await seal({ accessToken: token.access_token, expiresAt }, config.sessionSecret), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: config.secureCookies,
     maxAge: Math.max(60, token.expires_in - 60),
     path: "/",
   })
