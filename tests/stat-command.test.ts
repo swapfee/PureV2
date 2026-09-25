@@ -50,7 +50,7 @@ function interaction(overrides: Record<string, unknown> = {}) {
 }
 
 describe("/stat command", () => {
-  test("rejects DMs before deferring", async () => {
+  test("rejects DMs before sending a progress response", async () => {
     const fx = await fixture();
     await fx.service.execute(interaction({ guildId: undefined }));
     expect(fx.controls.responses[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> Statistics are only available in a server.");

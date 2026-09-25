@@ -348,7 +348,13 @@ describe("voice panel interactions", () => {
       }),
     );
 
-    expect(controls.deferredInteractions).toContain("500000000000000001");
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(controls.responses[0]?.embeds?.[0]?.description).toContain(
+      "<a:iconloading:1552886322589470781>",
+    );
+    expect(controls.responses[0]?.embeds?.[0]?.description).toContain(
+      "Locking voice channel...",
+    );
     const reply = controls.editedInteractions.at(-1);
     expect(reply?.embeds?.[0]?.description).toContain(
       "Only the owner of this voice channel can manage it",

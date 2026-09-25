@@ -15,9 +15,9 @@ import type {
 import {
   type ActionMessage,
   failureResponse,
-  loadingResponse,
   successResponse,
 } from "./action-response.ts";
+import { beginEphemeralProgress } from "./interaction-progress.ts";
 import { runFactoryReset } from "./factory-reset.ts";
 import {
   DEFAULT_SETUP_CATEGORY_NAME,
@@ -210,11 +210,10 @@ export function createSetupCommandService(options: {
           : sub.name === "interface"
             ? "Updating the voice interface..."
             : "Updating Join to Create...";
-      await discord.respondToInteraction({
-        interactionId: interaction.id,
-        interactionToken: interaction.token,
-        embeds: loadingResponse(loadingMessage, interaction.userId).embeds,
-        ephemeral: true,
+      await beginEphemeralProgress({
+        discord,
+        interaction,
+        message: loadingMessage,
       });
 
       if (isReset) {

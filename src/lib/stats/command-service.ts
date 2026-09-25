@@ -1,7 +1,8 @@
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
-import { failureResponse, loadingResponse, successResponse } from "../j2c/action-response.ts";
+import { failureResponse, successResponse } from "../j2c/action-response.ts";
+import { beginEphemeralProgress } from "../j2c/interaction-progress.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
 import type { VoiceStatsCardRenderer } from "./card-renderer.ts";
 import type { VoiceStatsService } from "./service.ts";
@@ -78,11 +79,10 @@ export function createStatsCommandService(options: {
         });
         return;
       }
-      await options.discord.respondToInteraction({
-        interactionId: interaction.id,
-        interactionToken: interaction.token,
-        embeds: loadingResponse("Generating statistics card...", interaction.userId).embeds,
-        ephemeral: true,
+      await beginEphemeralProgress({
+        discord: options.discord,
+        interaction,
+        message: "Generating statistics card...",
       });
       const fail = async (message: string): Promise<void> => options.discord.editInteractionResponse({
         applicationId: interaction.applicationId,
