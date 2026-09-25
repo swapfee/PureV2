@@ -15,6 +15,7 @@ import type {
 import {
   type ActionMessage,
   failureResponse,
+  loadingResponse,
   successResponse,
 } from "./action-response.ts";
 import { runFactoryReset } from "./factory-reset.ts";
@@ -202,9 +203,17 @@ export function createSetupCommandService(options: {
         return;
       }
 
-      await discord.deferInteraction({
+      const loadingMessage = isReset
+        ? "Resetting Join to Create..."
+        : sub.name === "create"
+          ? "Creating Join to Create..."
+          : sub.name === "interface"
+            ? "Updating the voice interface..."
+            : "Updating Join to Create...";
+      await discord.respondToInteraction({
         interactionId: interaction.id,
         interactionToken: interaction.token,
+        embeds: loadingResponse(loadingMessage, interaction.userId).embeds,
         ephemeral: true,
       });
 

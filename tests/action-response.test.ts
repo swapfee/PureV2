@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   ACTION_EMOJIS,
   failureResponse,
+  loadingResponse,
   successResponse,
 } from "../src/lib/j2c/action-response.ts";
 
@@ -25,5 +26,13 @@ describe("action-response", () => {
   test("does not add a second period when message already ends with punctuation", () => {
     const message = successResponse("Channel locked.");
     expect(message.embeds[0]?.description).toBe(`${ACTION_EMOJIS.success} Channel locked.`);
+  });
+
+  test("formats a colorless loading embed addressed to the requester", () => {
+    const message = loadingResponse("Generating statistics card...", "123456789012345678");
+    expect(message.embeds[0]?.description).toBe(
+      `${ACTION_EMOJIS.loading} <@123456789012345678>: Generating statistics card...`,
+    );
+    expect(message.embeds[0]).not.toHaveProperty("color");
   });
 });

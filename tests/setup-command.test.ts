@@ -97,7 +97,10 @@ describe("/setup command", () => {
 
     await setup.execute(baseInteraction());
 
-    expect(controls.deferredInteractions).toEqual(["987654321098765432"]);
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(controls.responses[0]?.embeds?.[0]?.description).toBe(
+      "<:iconloading:1552886322589470781> <@223456789012345678>: Creating Join to Create...",
+    );
     expect(controls.guildChannelCreates).toHaveLength(3);
     expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
     expect(controls.guildChannelCreates[0]?.name).toBe(DEFAULT_SETUP_CATEGORY_NAME);

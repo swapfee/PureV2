@@ -2,6 +2,7 @@
 export const ACTION_EMOJIS = {
   success: "<:success:1543407529302949908>",
   error: "<:error:1543407530380624037>",
+  loading: "<:iconloading:1552886322589470781>",
 } as const;
 
 export interface ActionEmbed {
@@ -34,6 +35,18 @@ export function failureResponse(message: string): ActionMessage {
     embeds: [
       {
         description: formatActionDescription(ACTION_EMOJIS.error, message),
+      },
+    ],
+  };
+}
+
+/** Initial ephemeral response for operations that continue asynchronously. */
+export function loadingResponse(message: string, userId?: string): ActionMessage {
+  const addressedMessage = userId ? `<@${userId}>: ${message}` : message;
+  return {
+    embeds: [
+      {
+        description: formatActionDescription(ACTION_EMOJIS.loading, addressedMessage),
       },
     ],
   };

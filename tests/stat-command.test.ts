@@ -62,7 +62,10 @@ describe("/stat command", () => {
     const fx = await fixture();
     fx.controls.voiceByUser.set(`${guildId}:${callerId}`, null);
     await fx.service.execute(interaction());
-    expect(fx.controls.deferredInteractions).toEqual(["interaction-1"]);
+    expect(fx.controls.deferredInteractions).toHaveLength(0);
+    expect(fx.controls.responses[0]?.embeds?.[0]?.description).toBe(
+      "<:iconloading:1552886322589470781> <@234567890123456789>: Generating statistics card...",
+    );
     expect(fx.controls.editedInteractions[0]?.files?.[0]?.name).toBe("voice-stats.png");
     expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:success:1543407529302949908> Voice statistics generated.");
   });
@@ -136,7 +139,10 @@ describe("/stat command", () => {
   test("returns a safe private failure when rendering fails", async () => {
     const fx = await fixture({ render: async () => { throw new Error("renderer-secret-detail"); } });
     await fx.service.execute(interaction());
-    expect(fx.controls.deferredInteractions).toEqual(["interaction-1"]);
+    expect(fx.controls.deferredInteractions).toHaveLength(0);
+    expect(fx.controls.responses[0]?.embeds?.[0]?.description).toContain(
+      "Generating statistics card...",
+    );
     expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:error:1543407530380624037> The statistics card could not be generated");
     expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).not.toContain("renderer-secret-detail");
   });
