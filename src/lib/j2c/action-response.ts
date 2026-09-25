@@ -2,7 +2,7 @@
 export const ACTION_EMOJIS = {
   success: "<:success:1543407529302949908>",
   error: "<:error:1543407530380624037>",
-  loading: "<:iconloading:1552886322589470781>",
+  loading: "<a:iconloading:1552886322589470781>",
 } as const;
 
 export interface ActionEmbed {

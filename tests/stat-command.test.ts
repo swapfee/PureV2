@@ -64,7 +64,7 @@ describe("/stat command", () => {
     await fx.service.execute(interaction());
     expect(fx.controls.deferredInteractions).toHaveLength(0);
     expect(fx.controls.responses[0]?.embeds?.[0]?.description).toBe(
-      "<:iconloading:1552886322589470781> <@234567890123456789>: Generating statistics card...",
+      "<a:iconloading:1552886322589470781> <@234567890123456789>: Generating statistics card...",
     );
     expect(fx.controls.editedInteractions[0]?.files?.[0]?.name).toBe("voice-stats.png");
     expect(fx.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain("<:success:1543407529302949908> Voice statistics generated.");

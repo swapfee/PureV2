@@ -99,7 +99,7 @@ describe("/setup command", () => {
 
     expect(controls.deferredInteractions).toHaveLength(0);
     expect(controls.responses[0]?.embeds?.[0]?.description).toBe(
-      "<:iconloading:1552886322589470781> <@223456789012345678>: Creating Join to Create...",
+      "<a:iconloading:1552886322589470781> <@223456789012345678>: Creating Join to Create...",
     );
     expect(controls.guildChannelCreates).toHaveLength(3);
     expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
