@@ -99,7 +99,7 @@ describe("creation lifecycle", () => {
     expect(metrics.snapshot().activeTemporaryChannels).toBe(1);
   });
 
-  test("moves the member before channel positioning and control-panel delivery", async () => {
+  test("moves the member before control-panel delivery without positioning REST calls", async () => {
     const configs = createMemoryGuildConfigRepository();
     await configs.upsert({
       guildId,
@@ -113,13 +113,6 @@ describe("creation lifecycle", () => {
     const reservations = createMemoryCreationReservationRepository();
     const metrics = createJ2cMetrics();
     const { discord, controls } = createFakeDiscord();
-    controls.channels.set(lobbyId, {
-      id: lobbyId,
-      name: "Join to Create",
-      position: 7,
-      guildId,
-      permissionOverwrites: [],
-    });
     controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
     controls.currentUser = { id: "111111111111111111", username: "Pure" };
 
@@ -129,14 +122,6 @@ describe("creation lifecycle", () => {
       async moveMemberToChannel(request) {
         operations.push("move");
         return discord.moveMemberToChannel(request);
-      },
-      async getChannel(request) {
-        if (request.channelId === lobbyId) operations.push("lobby-position-read");
-        return discord.getChannel(request);
-      },
-      async setGuildChannelPosition(request) {
-        operations.push("position");
-        return discord.setGuildChannelPosition(request);
       },
       async getCurrentUser() {
         operations.push("bot-user");
@@ -165,10 +150,9 @@ describe("creation lifecycle", () => {
 
     expect(outcome.kind).toBe("created");
     expect(operations.indexOf("move")).toBeGreaterThanOrEqual(0);
-    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("lobby-position-read"));
-    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("position"));
     expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("bot-user"));
     expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("panel"));
+    expect(controls.positionCalls).toHaveLength(0);
     const [record] = await channels.listByGuild(guildId);
     expect(record?.status).toBe("active");
     expect(record?.panelMessageId).toBeDefined();
@@ -259,7 +243,7 @@ describe("creation lifecycle", () => {
     expect(identityReads).toBe(0);
   });
 
-  test("bottom hoist creates the newest room immediately below the lobby", async () => {
+  test("bottom placement relies on Discord category append without a positioning request", async () => {
     const configs = createMemoryGuildConfigRepository();
     await configs.upsert({
       guildId,
@@ -292,12 +276,8 @@ describe("creation lifecycle", () => {
     });
 
     expect(outcome.kind).toBe("created");
-    const [stored] = await channels.listByGuild(guildId);
-    expect(controls.positionCalls).toHaveLength(1);
-    expect(controls.positionCalls[0]?.guildId).toBe(guildId);
-    expect(controls.positionCalls[0]?.channelId).toBe(stored?.channelId);
-    expect(controls.positionCalls[0]?.position).toBe(8);
-    expect(controls.positionCalls[0]?.requestId).toBe("j2c-position:event-bottom-hoist");
+    expect(controls.createCalls[0]?.parentId).toBe(categoryId);
+    expect(controls.positionCalls).toHaveLength(0);
   });
 
   test("top hoist appends new rooms in oldest-first creation order", async () => {
