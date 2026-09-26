@@ -32,6 +32,7 @@ import {
 import { LogoMark } from "@/components/wordmark"
 import { VoiceActivityChart } from "@/components/dashboard/voice-activity-chart"
 import type {
+  ActivityRangeDays,
   DashboardSection,
   DashboardSnapshot,
   JoinToCreateConfiguration,
@@ -69,6 +70,9 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
   const [savedToastExiting, setSavedToastExiting] = useState(false)
   const [saveError, setSaveError] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
+  const [activityDays, setActivityDays] = useState<ActivityRangeDays>(7)
+  const [activityLoading, setActivityLoading] = useState(false)
+  const activityRequestSequence = useRef(0)
   const toastExitTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const toastRemoveTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const dirty = JSON.stringify(configuration) !== JSON.stringify(savedConfiguration)
@@ -113,7 +117,7 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     if (Object.keys(update).length === 0) return
     setSaving(true)
     try {
-      const response = await fetch(`/api/dashboard/guilds/${selectedGuildId}/config`, {
+      const response = await fetch(`/api/dashboard/guilds/${selectedGuildId}/config?days=${activityDays}`, {
         method: "PUT",
         headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID() },
         body: JSON.stringify(update),
@@ -136,16 +140,51 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
 
   async function changeGuild(guildId: string) {
     if (guildId === selectedGuildId) return
-    const response = await fetch(`/api/dashboard/guilds/${guildId}/snapshot`, { cache: "no-store" })
-    const result = zDashboardResponse(await response.json())
-    if (!response.ok || !result.snapshot) {
-      showSaveToast(result.error ?? "Unable to load server")
-      return
+    const requestSequence = activityRequestSequence.current + 1
+    activityRequestSequence.current = requestSequence
+    setActivityLoading(true)
+    try {
+      const response = await fetch(`/api/dashboard/guilds/${guildId}/snapshot?days=${activityDays}`, { cache: "no-store" })
+      const result = zDashboardResponse(await response.json())
+      if (!response.ok || !result.snapshot) throw new Error(result.error ?? "Unable to load server")
+      if (activityRequestSequence.current !== requestSequence) return
+      setSelectedGuildId(guildId)
+      setSnapshot(result.snapshot)
+      setConfiguration(result.snapshot.configuration)
+      setSavedConfiguration(result.snapshot.configuration)
+    } catch (error) {
+      if (activityRequestSequence.current === requestSequence) {
+        showSaveToast(error instanceof Error ? error.message : "Unable to load server")
+      }
+    } finally {
+      if (activityRequestSequence.current === requestSequence) setActivityLoading(false)
     }
-    setSelectedGuildId(guildId)
-    setSnapshot(result.snapshot)
-    setConfiguration(result.snapshot.configuration)
-    setSavedConfiguration(result.snapshot.configuration)
+  }
+
+  async function changeActivityRange(days: ActivityRangeDays) {
+    if (days === activityDays || activityLoading) return
+    const requestSequence = activityRequestSequence.current + 1
+    activityRequestSequence.current = requestSequence
+    setActivityDays(days)
+    setActivityLoading(true)
+    try {
+      const response = await fetch(
+        `/api/dashboard/guilds/${selectedGuildId}/snapshot?days=${days}`,
+        { cache: "no-store" },
+      )
+      const result = zDashboardResponse(await response.json())
+      if (!response.ok || !result.snapshot) {
+        throw new Error(result.error ?? "Unable to load voice activity")
+      }
+      if (activityRequestSequence.current === requestSequence) setSnapshot(result.snapshot)
+    } catch (error) {
+      if (activityRequestSequence.current === requestSequence) {
+        setActivityDays(activityDays)
+        showSaveToast(error instanceof Error ? error.message : "Unable to load voice activity")
+      }
+    } finally {
+      if (activityRequestSequence.current === requestSequence) setActivityLoading(false)
+    }
   }
 
   return (
@@ -165,13 +204,13 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
         <DashboardHeader guildName={selectedGuild.name} onMenu={() => setMobileOpen(true)} onNavigate={navigate} viewer={snapshot.viewer} />
 
         <main className="mx-auto max-w-[1500px] px-4 pb-16 pt-7 sm:px-7 lg:px-10">
-          {activeSection === "overview" && <Overview snapshot={snapshot} onNavigate={navigate} />}
+          {activeSection === "overview" && <Overview activityDays={activityDays} activityLoading={activityLoading} onActivityRangeChange={(days) => void changeActivityRange(days)} snapshot={snapshot} onNavigate={navigate} />}
           {activeSection === "join-to-create" && (
             <JoinToCreateSettings configuration={configuration} onChange={setConfiguration} onCommit={() => void commitConfiguration()} />
           )}
           {activeSection === "channels" && <ChannelDirectory channels={snapshot.channels} />}
           {activeSection === "members" && <MemberAccessPreview />}
-          {activeSection === "statistics" && <StatisticsPanel snapshot={snapshot} expanded />}
+          {activeSection === "statistics" && <StatisticsPanel activityDays={activityDays} loading={activityLoading} onRangeChange={(days) => void changeActivityRange(days)} snapshot={snapshot} expanded />}
           {activeSection === "settings" && <ServerSettings />}
         </main>
       </div>
@@ -464,13 +503,25 @@ function SavedToast({ error, exiting, visible }: { error?: string; exiting: bool
   )
 }
 
-function Overview({ snapshot, onNavigate }: { snapshot: DashboardSnapshot; onNavigate: (section: DashboardSection) => void }) {
+function Overview({
+  activityDays,
+  activityLoading,
+  snapshot,
+  onActivityRangeChange,
+  onNavigate,
+}: {
+  activityDays: ActivityRangeDays
+  activityLoading: boolean
+  snapshot: DashboardSnapshot
+  onActivityRangeChange: (days: ActivityRangeDays) => void
+  onNavigate: (section: DashboardSection) => void
+}) {
   return (
     <div className="space-y-7">
       <PageHeading eyebrow="Overview" title={`Welcome, ${snapshot.viewer.displayName}.`} description="Here is what is happening across your managed voice channels." />
       <SummaryGrid snapshot={snapshot} />
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.55fr)]">
-        <StatisticsPanel snapshot={snapshot} />
+        <StatisticsPanel activityDays={activityDays} loading={activityLoading} onRangeChange={onActivityRangeChange} snapshot={snapshot} />
         <RecentActivityList activity={snapshot.activity} />
       </div>
       <section>
@@ -492,14 +543,26 @@ function SummaryGrid({ snapshot }: { snapshot: DashboardSnapshot }) {
   const cards = [
     { label: "Active channels", value: snapshot.summary.activeChannels, detail: "+2 in the last hour", icon: Headphones },
     { label: "Members in voice", value: snapshot.summary.connectedMembers, detail: "Across managed rooms", icon: Users },
-    { label: "Created today", value: snapshot.summary.channelsCreatedToday, detail: "+18% from yesterday", icon: Activity },
+    { label: "Voice sessions", value: snapshot.summary.voiceSessions, detail: "Selected activity range", icon: Activity },
     { label: "Average session", value: `${snapshot.summary.averageSessionMinutes}m`, detail: "Past seven days", icon: Clock3 },
   ]
   return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{cards.map(({ label, value, detail, icon: Icon }) => <article key={label} className="rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5"><div className="flex items-center justify-between"><span className="text-xs text-muted-foreground">{label}</span><span className="flex size-8 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.025]"><Icon className="size-4" /></span></div><div className="mt-5 text-3xl font-semibold tracking-tight">{value}</div><div className="mt-2 text-[11px] text-muted-foreground">{detail}</div></article>)}</div>
 }
 
-function StatisticsPanel({ snapshot, expanded = false }: { snapshot: DashboardSnapshot; expanded?: boolean }) {
-  return <section className={cn("rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-6", expanded && "min-h-[520px]")}><div className="flex items-start justify-between"><div><h2 className="text-sm font-medium">Voice activity</h2><p className="mt-1 text-[11px] text-muted-foreground">Minutes spent in managed rooms</p></div><select aria-label="Voice activity range" className="rounded-lg border border-white/[0.08] bg-black px-2.5 py-1.5 text-[11px] text-muted-foreground outline-none"><option>Last 7 days</option><option>Last 30 days</option></select></div><div className={cn("mt-7 min-w-0", expanded ? "h-[390px]" : "h-[245px]")}><VoiceActivityChart data={snapshot.voiceActivity} /></div></section>
+function StatisticsPanel({
+  activityDays,
+  loading,
+  onRangeChange,
+  snapshot,
+  expanded = false,
+}: {
+  activityDays: ActivityRangeDays
+  loading: boolean
+  onRangeChange: (days: ActivityRangeDays) => void
+  snapshot: DashboardSnapshot
+  expanded?: boolean
+}) {
+  return <section className={cn("rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-6", expanded && "min-h-[520px]")}><div className="flex items-start justify-between"><div><h2 className="text-sm font-medium">Voice activity</h2><p className="mt-1 text-[11px] text-muted-foreground">Minutes spent in managed rooms · UTC</p></div><select aria-label="Voice activity range" className="rounded-lg border border-white/[0.08] bg-black px-2.5 py-1.5 text-[11px] text-muted-foreground outline-none disabled:cursor-wait disabled:opacity-50" disabled={loading} onChange={(event) => onRangeChange(event.target.value === "30" ? 30 : 7)} value={activityDays}><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select></div><div className={cn("mt-7 min-w-0 transition-opacity", loading && "opacity-45", expanded ? "h-[390px]" : "h-[245px]")}><VoiceActivityChart data={snapshot.voiceActivity} /></div></section>
 }
 
 function RecentActivityList({ activity }: { activity: DashboardSnapshot["activity"] }) {

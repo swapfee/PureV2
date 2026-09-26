@@ -3,6 +3,7 @@ import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import { cooldownFailureMessage } from "../discord-timestamp.ts";
 import { failureResponse, successResponse, type ActionMessage } from "./action-response.ts";
+import { beginEphemeralProgress } from "./interaction-progress.ts";
 import { postGuildErrorLog, solutionForDiscordOutcome } from "./guild-error-log.ts";
 import {
   authorizeVcConnectedMember,
@@ -109,6 +110,31 @@ const PERSONAL_SUBCOMMANDS = new Set<VcSubcommand>(["block", "unblock", "block-l
 /** Guild-scoped join requests — target a locked managed channel by id/owner. */
 const REQUEST_SUBCOMMANDS = new Set<VcSubcommand>(["request"]);
 
+const VC_PROGRESS_MESSAGES: Readonly<Record<VcSubcommand, string>> = {
+  invite: "Creating voice channel invitation...",
+  request: "Sending join request...",
+  rename: "Renaming voice channel...",
+  limit: "Updating voice channel limit...",
+  bitrate: "Updating voice channel bitrate...",
+  status: "Updating voice channel status...",
+  nsfw: "Updating voice channel age restriction...",
+  region: "Updating voice channel region...",
+  lock: "Locking voice channel...",
+  unlock: "Unlocking voice channel...",
+  hide: "Hiding voice channel...",
+  unhide: "Making voice channel visible...",
+  permit: "Updating member access...",
+  reject: "Updating member access...",
+  mute: "Muting member...",
+  unmute: "Unmuting member...",
+  transfer: "Transferring voice channel ownership...",
+  info: "Loading voice channel information...",
+  delete: "Deleting voice channel...",
+  block: "Updating block list...",
+  unblock: "Updating block list...",
+  "block-list": "Loading block list...",
+};
+
 function normalizeChannelName(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
   if (trimmed.length < 1 || trimmed.length > 100) return undefined;
@@ -191,10 +217,10 @@ export function createVcCommandService(options: {
 
   const reply = async (
     interaction: InteractionCreatePayload,
-    deferred: boolean,
+    initialResponseSent: boolean,
     message: ActionMessage,
   ): Promise<void> => {
-    if (deferred) {
+    if (initialResponseSent) {
       await options.discord.editInteractionResponse({
         applicationId: interaction.applicationId,
         interactionToken: interaction.token,
@@ -231,17 +257,17 @@ export function createVcCommandService(options: {
 
       options.metrics.attempt(sub.name);
       const subcommand = sub.name;
-      await options.discord.deferInteraction({
-        interactionId: interaction.id,
-        interactionToken: interaction.token,
-        ephemeral: true,
+      await beginEphemeralProgress({
+        discord: options.discord,
+        interaction,
+        message: VC_PROGRESS_MESSAGES[subcommand],
       });
-      const deferred = true;
+      const initialResponseSent = true;
 
       if (PERSONAL_SUBCOMMANDS.has(subcommand)) {
         if (!interaction.guildId) {
           options.metrics.authorizationFailure();
-          await reply(interaction, deferred, failureResponse("This command can only be used in a server."));
+          await reply(interaction, initialResponseSent, failureResponse("This command can only be used in a server."));
           return;
         }
         const guildId = interaction.guildId;
@@ -251,13 +277,13 @@ export function createVcCommandService(options: {
           options.metrics.cooldownRejection();
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             failureResponse(cooldownFailureMessage(remainingMs)),
           );
           return;
         }
         if (!options.blocks) {
-          await reply(interaction, deferred, failureResponse("The block list is currently unavailable."));
+          await reply(interaction, initialResponseSent, failureResponse("The block list is currently unavailable."));
           return;
         }
         const requestId = `vc:${subcommand}:${interaction.id}`;
@@ -272,7 +298,7 @@ export function createVcCommandService(options: {
               options.metrics.validationFailure();
               await reply(
                 interaction,
-                deferred,
+                initialResponseSent,
                 failureResponse(`Specify a member to ${subcommand}.`),
               );
               return;
@@ -293,7 +319,7 @@ export function createVcCommandService(options: {
                 options.metrics.success("block");
                 await reply(
                   interaction,
-                  deferred,
+                  initialResponseSent,
                   successResponse(
                     outcome.partialSync
                       ? `<@${targetUserId}> has been blocked. Some channels could not be updated.`
@@ -313,7 +339,7 @@ export function createVcCommandService(options: {
                       : outcome.kind === "limit_reached"
                         ? "Your block list is full (maximum 50 members)."
                         : "Unable to resolve that user.";
-              await reply(interaction, deferred, failureResponse(message));
+              await reply(interaction, initialResponseSent, failureResponse(message));
               return;
             }
 
@@ -332,7 +358,7 @@ export function createVcCommandService(options: {
               options.metrics.success("unblock");
               await reply(
                 interaction,
-                deferred,
+                initialResponseSent,
                 successResponse(
                   outcome.partialSync
                     ? `<@${targetUserId}> has been unblocked. Some channels could not be updated.`
@@ -342,7 +368,7 @@ export function createVcCommandService(options: {
               return;
             }
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("That member is not on your block list."));
+            await reply(interaction, initialResponseSent, failureResponse("That member is not on your block list."));
             return;
           }
 
@@ -392,7 +418,7 @@ export function createVcCommandService(options: {
           }
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             failureResponse("An unexpected error occurred. Please try again."),
           );
         }
@@ -403,7 +429,7 @@ export function createVcCommandService(options: {
         options.metrics.authorizationFailure();
         await reply(
           interaction,
-          deferred,
+          initialResponseSent,
           failureResponse("This command can only be used in a server."),
         );
         return;
@@ -415,7 +441,7 @@ export function createVcCommandService(options: {
           options.metrics.authorizationFailure();
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             failureResponse("Join to Create System is not configured in this server."),
           );
           return;
@@ -430,7 +456,7 @@ export function createVcCommandService(options: {
           options.metrics.cooldownRejection();
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             failureResponse(cooldownFailureMessage(remainingMs)),
           );
           return;
@@ -451,7 +477,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Specify a valid voice channel ID or channel owner ID."),
             );
             return;
@@ -466,7 +492,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("No managed temporary voice channel matched that target."),
             );
             return;
@@ -475,7 +501,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You already own that channel."),
             );
             return;
@@ -484,7 +510,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You are rejected from that channel."),
             );
             return;
@@ -495,7 +521,7 @@ export function createVcCommandService(options: {
               options.metrics.validationFailure();
               await reply(
                 interaction,
-                deferred,
+                initialResponseSent,
                 failureResponse("You are blocked from this channel by its owner."),
               );
               return;
@@ -505,14 +531,14 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: record.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           if (!channelIsLockedForJoinRequests(record, channel.value)) {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That channel is not locked."),
             );
             return;
@@ -527,7 +553,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You already have access to that channel."),
             );
             return;
@@ -541,7 +567,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You are already connected to that channel."),
             );
             return;
@@ -551,7 +577,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You already have a pending join request for that channel."),
             );
             return;
@@ -585,7 +611,7 @@ export function createVcCommandService(options: {
             });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to post the join request in that channel."),
             );
             return;
@@ -626,7 +652,7 @@ export function createVcCommandService(options: {
           });
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             successResponse(
               `Join request sent to <#${record.channelId}>. The owner has 60 seconds to respond.`,
             ),
@@ -639,7 +665,7 @@ export function createVcCommandService(options: {
           });
           await reply(
             interaction,
-            deferred,
+            initialResponseSent,
             failureResponse("An unexpected error occurred. Please try again."),
           );
         }
@@ -667,7 +693,7 @@ export function createVcCommandService(options: {
 
       if (!auth.ok) {
         options.metrics.authorizationFailure();
-        await reply(interaction, deferred, failureResponse(vcAuthUserMessage(auth.reason)));
+        await reply(interaction, initialResponseSent, failureResponse(vcAuthUserMessage(auth.reason)));
         return;
       }
 
@@ -677,7 +703,7 @@ export function createVcCommandService(options: {
         options.metrics.cooldownRejection();
         await reply(
           interaction,
-          deferred,
+          initialResponseSent,
           failureResponse(cooldownFailureMessage(remainingMs)),
         );
         return;
@@ -697,7 +723,7 @@ export function createVcCommandService(options: {
         options.cooldowns.touch(cooldownKey, VC_COOLDOWNS_MS[subcommand]);
         options.metrics.success(subcommand);
         options.logger.info(`VC ${subcommand} succeeded`, { ...baseLog, outcome: "ok" });
-        await reply(interaction, deferred, successResponse(message));
+        await reply(interaction, initialResponseSent, successResponse(message));
       };
 
       try {
@@ -707,7 +733,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load channel details."),
             );
             return;
@@ -739,19 +765,19 @@ export function createVcCommandService(options: {
           const targetUserId = optionValue(sub.options, "member");
           if (typeof targetUserId !== "string") {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("Specify a member to invite."));
+            await reply(interaction, initialResponseSent, failureResponse("Specify a member to invite."));
             return;
           }
           if (targetUserId === interaction.userId) {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("You cannot invite yourself."));
+            await reply(interaction, initialResponseSent, failureResponse("You cannot invite yourself."));
             return;
           }
           if (auth.channel.rejectedUserIds.includes(targetUserId)) {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That member is rejected from this channel."),
             );
             return;
@@ -765,7 +791,7 @@ export function createVcCommandService(options: {
               options.metrics.validationFailure();
               await reply(
                 interaction,
-                deferred,
+                initialResponseSent,
                 failureResponse("That member is blocked from this channel."),
               );
               return;
@@ -774,12 +800,12 @@ export function createVcCommandService(options: {
           const target = await options.discord.getUser({ userId: targetUserId });
           if (target.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to resolve that user."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to resolve that user."));
             return;
           }
           if (target.value.bot) {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("You cannot invite bots."));
+            await reply(interaction, initialResponseSent, failureResponse("You cannot invite bots."));
             return;
           }
           const targetVoice = await options.discord.getUserVoiceChannel({
@@ -790,7 +816,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That member is already connected to this channel."),
             );
             return;
@@ -805,7 +831,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC invite DM failed", { ...baseLog, targetUserId, outcome: dm.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to send a direct message to that member."),
             );
             return;
@@ -818,7 +844,7 @@ export function createVcCommandService(options: {
           const rawName = optionValue(sub.options, "name");
           if (typeof rawName !== "string") {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("Specify a new channel name."));
+            await reply(interaction, initialResponseSent, failureResponse("Specify a new channel name."));
             return;
           }
           const name = normalizeChannelName(rawName);
@@ -826,7 +852,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Channel name must be 1–100 characters."),
             );
             return;
@@ -834,14 +860,14 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           if (channel.value.name === name) {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`The channel is already named \`${name}\`.`),
             );
             return;
@@ -855,7 +881,7 @@ export function createVcCommandService(options: {
           if (result.kind !== "ok") {
             options.metrics.restFailure();
             options.logger.warn("VC rename failed", { ...baseLog, outcome: result.kind });
-            await reply(interaction, deferred, failureResponse("Unable to rename the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to rename the channel."));
             return;
           }
           await succeed(`Channel renamed to \`${name}\`.`);
@@ -868,7 +894,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("User limit must be an integer from 0 to 99 (0 = unlimited)."),
             );
             return;
@@ -876,7 +902,7 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           const current = channel.value.userLimit ?? 0;
@@ -884,7 +910,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(amount === 0
                   ? "The user limit is already unlimited."
                   : `The user limit is already ${amount}.`),
@@ -902,7 +928,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC limit failed", { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to update the user limit."),
             );
             return;
@@ -922,7 +948,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(
                 `Bitrate must be an integer from ${VOICE_BITRATE_MIN_KBPS} to 384 kbps.`,
               ),
@@ -934,7 +960,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load server boost information."),
             );
             return;
@@ -944,7 +970,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(
                 `Maximum bitrate for this server is ${maxKbps} kbps (boost level ${guild.value.premiumTier}).`,
               ),
@@ -954,7 +980,7 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           const currentKbps =
@@ -963,7 +989,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`The channel bitrate is already ${kbps} kbps.`),
             );
             return;
@@ -979,7 +1005,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC bitrate failed", { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to update the channel bitrate."),
             );
             return;
@@ -994,7 +1020,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Status text must be a string."),
             );
             return;
@@ -1006,7 +1032,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`Status text must be at most ${VOICE_STATUS_MAX_LENGTH} characters.`),
             );
             return;
@@ -1014,7 +1040,7 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           const current = channel.value.status ?? null;
@@ -1023,7 +1049,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(
                 nextStatus === null
                   ? "The channel status is already cleared."
@@ -1042,7 +1068,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC status failed", { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to update the channel status."),
             );
             return;
@@ -1061,7 +1087,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Specify whether age restriction should be enabled."),
             );
             return;
@@ -1069,14 +1095,14 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           if ((channel.value.nsfw === true) === enabled) {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(
                 enabled
                   ? "Age restriction is already enabled."
@@ -1096,7 +1122,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC nsfw failed", { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to update age restriction."),
             );
             return;
@@ -1111,7 +1137,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Select a valid voice region."),
             );
             return;
@@ -1120,7 +1146,7 @@ export function createVcCommandService(options: {
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
           if (channel.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to load the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to load the channel."));
             return;
           }
           const current = channel.value.rtcRegion ?? null;
@@ -1128,7 +1154,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(
                 `The channel region is already ${formatVoiceRegion(nextRegion)}.`,
               ),
@@ -1146,7 +1172,7 @@ export function createVcCommandService(options: {
             options.logger.warn("VC region failed", { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to update the channel region."),
             );
             return;
@@ -1161,7 +1187,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load channel permissions."),
             );
             return;
@@ -1178,7 +1204,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(wantLocked
                   ? "The channel is already locked."
                   : "The channel is already unlocked."),
@@ -1198,7 +1224,7 @@ export function createVcCommandService(options: {
             options.logger.warn(`VC ${subcommand} failed`, { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`Unable to ${subcommand} the channel.`),
             );
             return;
@@ -1214,7 +1240,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load channel permissions."),
             );
             return;
@@ -1230,7 +1256,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(wantHidden
                   ? "The channel is already hidden."
                   : "The channel is already visible."),
@@ -1250,7 +1276,7 @@ export function createVcCommandService(options: {
             options.logger.warn(`VC ${subcommand} failed`, { ...baseLog, outcome: result.kind });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`Unable to ${subcommand} the channel.`),
             );
             return;
@@ -1263,23 +1289,23 @@ export function createVcCommandService(options: {
           const targetUserId = optionValue(sub.options, "member");
           if (typeof targetUserId !== "string") {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("Specify a member to permit."));
+            await reply(interaction, initialResponseSent, failureResponse("Specify a member to permit."));
             return;
           }
           if (targetUserId === interaction.userId) {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("You cannot permit yourself."));
+            await reply(interaction, initialResponseSent, failureResponse("You cannot permit yourself."));
             return;
           }
           const target = await options.discord.getUser({ userId: targetUserId });
           if (target.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to resolve that user."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to resolve that user."));
             return;
           }
           if (target.value.bot) {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("You cannot permit bots."));
+            await reply(interaction, initialResponseSent, failureResponse("You cannot permit bots."));
             return;
           }
           if (options.blocks) {
@@ -1291,7 +1317,7 @@ export function createVcCommandService(options: {
               options.metrics.validationFailure();
               await reply(
                 interaction,
-                deferred,
+                initialResponseSent,
                 failureResponse(
                   "That member is on your block list. Use /vc unblock before permitting them.",
                 ),
@@ -1304,7 +1330,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load channel permissions."),
             );
             return;
@@ -1319,7 +1345,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("The member is already permitted."),
             );
             return;
@@ -1336,7 +1362,7 @@ export function createVcCommandService(options: {
           if (result.kind !== "ok") {
             options.metrics.restFailure();
             options.logger.warn("VC permit failed", { ...baseLog, targetUserId, outcome: result.kind });
-            await reply(interaction, deferred, failureResponse("Unable to update channel permissions."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to update channel permissions."));
             return;
           }
           await succeed("Member can now view and join this channel.");
@@ -1347,12 +1373,12 @@ export function createVcCommandService(options: {
           const targetUserId = optionValue(sub.options, "member");
           if (typeof targetUserId !== "string") {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("Specify a member to reject."));
+            await reply(interaction, initialResponseSent, failureResponse("Specify a member to reject."));
             return;
           }
           if (targetUserId === interaction.userId) {
             options.metrics.validationFailure();
-            await reply(interaction, deferred, failureResponse("You cannot reject yourself."));
+            await reply(interaction, initialResponseSent, failureResponse("You cannot reject yourself."));
             return;
           }
           const channel = await options.discord.getChannel({ channelId: auth.channel.channelId });
@@ -1360,7 +1386,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to load channel permissions."),
             );
             return;
@@ -1382,7 +1408,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("The member is already rejected."),
             );
             return;
@@ -1399,7 +1425,7 @@ export function createVcCommandService(options: {
           if (result.kind !== "ok") {
             options.metrics.restFailure();
             options.logger.warn("VC reject failed", { ...baseLog, targetUserId, outcome: result.kind });
-            await reply(interaction, deferred, failureResponse("Unable to reject that member."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to reject that member."));
             return;
           }
           await succeed("Member denied and disconnected if present.");
@@ -1413,7 +1439,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`Specify a member to ${subcommand}.`),
             );
             return;
@@ -1422,7 +1448,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`You cannot ${subcommand} yourself.`),
             );
             return;
@@ -1430,14 +1456,14 @@ export function createVcCommandService(options: {
           const target = await options.discord.getUser({ userId: targetUserId });
           if (target.kind !== "found") {
             options.metrics.restFailure();
-            await reply(interaction, deferred, failureResponse("Unable to resolve that user."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to resolve that user."));
             return;
           }
           if (target.value.bot) {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`You cannot ${subcommand} bots.`),
             );
             return;
@@ -1450,7 +1476,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That member must be connected to this channel."),
             );
             return;
@@ -1462,7 +1488,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(wantMuted ? "The member is already muted." : "The member is already unmuted."),
             );
             return;
@@ -1483,7 +1509,7 @@ export function createVcCommandService(options: {
             });
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse(`Unable to ${subcommand} that member.`),
             );
             return;
@@ -1498,7 +1524,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Specify a member to transfer ownership to."),
             );
             return;
@@ -1507,7 +1533,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You already own this channel."),
             );
             return;
@@ -1517,7 +1543,7 @@ export function createVcCommandService(options: {
             options.metrics.restFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to resolve that user."),
             );
             return;
@@ -1526,7 +1552,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("You cannot transfer ownership to a bot."),
             );
             return;
@@ -1535,7 +1561,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That member is rejected from this channel."),
             );
             return;
@@ -1548,7 +1574,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("That member must be connected to this channel."),
             );
             return;
@@ -1558,7 +1584,7 @@ export function createVcCommandService(options: {
             options.metrics.validationFailure();
             await reply(
               interaction,
-              deferred,
+              initialResponseSent,
               failureResponse("Unable to transfer ownership right now."),
             );
             return;
@@ -1630,7 +1656,7 @@ export function createVcCommandService(options: {
                 },
               });
             }
-            await reply(interaction, deferred, failureResponse("Unable to delete the channel."));
+            await reply(interaction, initialResponseSent, failureResponse("Unable to delete the channel."));
             return;
           }
           await options.channels.remove(auth.channel.channelId);
@@ -1662,7 +1688,7 @@ export function createVcCommandService(options: {
         }
         await reply(
           interaction,
-          deferred,
+          initialResponseSent,
           failureResponse("An unexpected error occurred. Please try again."),
         );
       }

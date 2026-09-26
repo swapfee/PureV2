@@ -33,6 +33,10 @@ export const MODEL_COLLECTIONS: Readonly<Record<string, string>> = {
   TemporaryChannel: "temporary_channels",
   CreationReservation: "creation_reservations",
   OwnerBlockList: "owner_block_lists",
+  VoiceStatsSession: "voice_stats_sessions",
+  VoiceMemberStats: "voice_member_stats",
+  VoiceDailyStats: "voice_daily_stats",
+  VoiceStatsEvent: "voice_stats_events",
 };
 
 export function buildIndexCreateOptions(spec: RequiredIndexSpec): {

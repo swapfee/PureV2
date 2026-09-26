@@ -18,6 +18,9 @@ export interface CommandContext {
   readonly setup?: {
     execute(interaction: InteractionCreatePayload): Promise<void>;
   };
+  readonly stats?: {
+    execute(interaction: InteractionCreatePayload): Promise<void>;
+  };
 }
 
 export interface CommandModule {
@@ -57,8 +60,14 @@ export interface EventContext {
   readonly commands: InteractionDispatcher;
   readonly discord: DiscordApiPort;
   readonly j2c?: J2cEventServices;
+  readonly stats?: {
+    handle(payload: RuntimeEventMap["voiceStateUpdate"], eventId: string): Promise<void>;
+    reconcileGuild(guildId: string, states: readonly RuntimeEventMap["voiceStateUpdate"][]): Promise<void>;
+    expectGuilds(guildIds: readonly string[]): void;
+  };
   /** Set by the worker for the gateway event currently being processed. */
   currentEventId?: string;
+  currentGatewaySequence?: number;
 }
 
 export interface EventModule<Name extends RuntimeEventName = RuntimeEventName> {

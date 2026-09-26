@@ -6,6 +6,11 @@ import type {
   GuildConfigRepository,
   TemporaryChannelRepository,
 } from "../j2c/repositories.ts";
+import {
+  splitDurationByUtcDay,
+  utcDayStart,
+  type VoiceStatsRepository,
+} from "../stats/repositories.ts";
 import { timingSafeEqualString } from "../security.ts";
 
 const snowflakeSchema = z.string().regex(/^\d{17,20}$/);
@@ -30,9 +35,11 @@ export interface DashboardControlApiOptions {
   readonly bodyLimitBytes: number;
   readonly configs: GuildConfigRepository;
   readonly channels: TemporaryChannelRepository;
+  readonly stats: Pick<VoiceStatsRepository, "getGuildDaily" | "listActiveByGuild">;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly isReady: () => boolean;
+  readonly now?: () => Date;
 }
 
 export interface DashboardControlApi {
@@ -69,8 +76,16 @@ interface DashboardSnapshotDto {
   readonly summary: {
     readonly activeChannels: number;
     readonly connectedMembers: number;
+    readonly voiceSeconds: number;
+    readonly voiceSessions: number;
   };
+  readonly voiceActivity: readonly {
+    readonly day: string;
+    readonly seconds: number;
+  }[];
 }
+
+type DashboardRangeDays = 7 | 30;
 
 function errorResponse(code: string, message: string, status: number): Response {
   return Response.json({ ok: false, error: { code, message } }, { status });
@@ -124,16 +139,60 @@ async function mapWithConcurrency<T, R>(
   return batches.flat().toSorted((left, right) => left.index - right.index).map(({ result }) => result);
 }
 
+async function buildVoiceActivity(
+  guildId: string,
+  days: DashboardRangeDays,
+  now: Date,
+  stats: DashboardControlApiOptions["stats"],
+): Promise<{
+  readonly points: readonly { readonly day: string; readonly seconds: number }[];
+  readonly totalSeconds: number;
+  readonly sessionCount: number;
+}> {
+  const today = utcDayStart(now);
+  const from = new Date(today.getTime() - (days - 1) * 86_400_000);
+  const [dailyRows, activeSessions] = await Promise.all([
+    stats.getGuildDaily(guildId, from, today),
+    stats.listActiveByGuild(guildId),
+  ]);
+  const secondsByDay = new Map(
+    dailyRows.map((row) => [row.day.toISOString(), row.durationSeconds]),
+  );
+
+  for (const session of activeSessions) {
+    const startedAt = session.startedAt < from ? from : session.startedAt;
+    for (const part of splitDurationByUtcDay(startedAt, now)) {
+      const key = part.day.toISOString();
+      secondsByDay.set(key, (secondsByDay.get(key) ?? 0) + part.seconds);
+    }
+  }
+
+  const points = Array.from({ length: days }, (_, index) => {
+    const day = new Date(from.getTime() + index * 86_400_000);
+    return {
+      day: day.toISOString().slice(0, 10),
+      seconds: secondsByDay.get(day.toISOString()) ?? 0,
+    };
+  });
+  return {
+    points,
+    totalSeconds: points.reduce((total, point) => total + point.seconds, 0),
+    sessionCount: dailyRows.reduce((total, row) => total + row.sessionCount, 0),
+  };
+}
+
 async function buildSnapshot(
   guildId: string,
   options: DashboardControlApiOptions,
+  days: DashboardRangeDays = 7,
 ): Promise<DashboardSnapshotDto | undefined> {
   const config = await options.configs.findByGuildId(guildId);
   if (!config) return undefined;
 
   const records = await options.channels.listByGuild(guildId);
   const activeRecords = records.filter((record) => record.status === "active").slice(0, 100);
-  const [lobbyChannelName, categoryName, channelNames] = await Promise.all([
+  const now = options.now?.() ?? new Date();
+  const [lobbyChannelName, categoryName, channelNames, voice] = await Promise.all([
     resolveChannelName(options.discord, config.lobbyChannelId, "Join to Create"),
     resolveChannelName(options.discord, config.categoryId, "Temporary Voice Channel"),
     mapWithConcurrency(
@@ -145,6 +204,7 @@ async function buildSnapshot(
         `Channel ${record.channelId.slice(-4)}`,
       ),
     ),
+    buildVoiceActivity(guildId, days, now, options.stats),
   ]);
 
   const activeChannels = activeRecords.map((record, index) => ({
@@ -173,9 +233,12 @@ async function buildSnapshot(
       updatedAt: config.updatedAt.toISOString(),
     },
     channels: activeChannels,
+    voiceActivity: voice.points,
     summary: {
       activeChannels: activeChannels.length,
       connectedMembers: activeChannels.reduce((total, channel) => total + channel.memberCount, 0),
+      voiceSeconds: voice.totalSeconds,
+      voiceSessions: voice.sessionCount,
     },
   };
 }
@@ -185,6 +248,7 @@ async function updateConfiguration(
   update: DashboardConfigUpdate,
   options: DashboardControlApiOptions,
   requestId: string,
+  days: DashboardRangeDays,
 ): Promise<DashboardSnapshotDto | undefined> {
   const current = await options.configs.findByGuildId(guildId);
   if (!current) return undefined;
@@ -229,7 +293,7 @@ async function updateConfiguration(
     moderatorRoleIds: current.moderatorRoleIds,
   });
 
-  return buildSnapshot(guildId, options);
+  return buildSnapshot(guildId, options, days);
 }
 
 export function createDashboardControlApi(options: DashboardControlApiOptions): DashboardControlApi {
@@ -266,10 +330,14 @@ export function createDashboardControlApi(options: DashboardControlApiOptions): 
           if (!guildId || !snowflakeSchema.safeParse(guildId).success || !resource) {
             return errorResponse("invalid_route", "Invalid guild route", 400);
           }
+          const requestedDays = Number(url.searchParams.get("days") ?? "7");
+          if (requestedDays !== 7 && requestedDays !== 30) {
+            return errorResponse("invalid_range", "Statistics range must be 7 or 30 days", 400);
+          }
 
           try {
             if (request.method === "GET") {
-              const snapshot = await buildSnapshot(guildId, options);
+              const snapshot = await buildSnapshot(guildId, options, requestedDays);
               if (!snapshot) return errorResponse("not_configured", "Join to Create is not configured", 404);
               if (resource === "snapshot") return Response.json({ ok: true, snapshot });
               return Response.json({ ok: true, configuration: snapshot.configuration });
@@ -281,7 +349,13 @@ export function createDashboardControlApi(options: DashboardControlApiOptions): 
                 return errorResponse("invalid_configuration", "Configuration payload is invalid", 400);
               }
               const requestId = request.headers.get("x-request-id")?.slice(0, 100) || crypto.randomUUID();
-              const snapshot = await updateConfiguration(guildId, parsed.data, options, requestId);
+              const snapshot = await updateConfiguration(
+                guildId,
+                parsed.data,
+                options,
+                requestId,
+                requestedDays,
+              );
               if (!snapshot) return errorResponse("not_configured", "Join to Create is not configured", 404);
               options.logger.info("Dashboard configuration updated", { guildId });
               return Response.json({ ok: true, snapshot });

@@ -155,7 +155,11 @@ describe("/vc command family", () => {
         options: [{ name: "lock", type: 1 }],
       }),
     );
-    expect(controls.deferredInteractions).toHaveLength(1);
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(embedText(controls.responses[0])).toContain(
+      "<a:iconloading:1552886322589470781>",
+    );
+    expect(embedText(controls.responses[0])).toContain("Locking voice channel...");
     expect(embedText(controls.editedInteractions[0])).toMatch(/server/i);
     expect(metrics.snapshot().authorizationFailures).toBe(1);
   });
@@ -798,7 +802,7 @@ describe("/vc command family", () => {
     expect(await channels.findByChannelId(channelId)).toBeUndefined();
   });
 
-  test("replays do not mutate twice and defer before work", async () => {
+  test("replays do not mutate twice and show progress before work", async () => {
     const { vc, controls, metrics, completed } = await setup();
     const payload = interaction({
       id: "replay-1",
@@ -811,7 +815,8 @@ describe("/vc command family", () => {
     expect(controls.overwriteCalls.length).toBe(overwriteCount);
     expect(metrics.snapshot().replayDedups).toBe(1);
     expect(completed.has("replay-1")).toBe(true);
-    expect(controls.deferredInteractions[0]).toBe("replay-1");
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(embedText(controls.responses[0])).toContain("Locking voice channel...");
   });
 
   test("REST failures return safe ephemeral messages", async () => {

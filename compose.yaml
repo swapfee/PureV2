@@ -1,5 +1,5 @@
 # PureV2 — one coordinator container with in-process Bun child workers.
-# MongoDB is Atlas (external). Do not add local Mongo or Redis.
+# MongoDB is Atlas (external). Redis is private, disposable live-state only.
 #
 # Health is published ONLY to the VPS loopback:
 #   curl http://127.0.0.1:3000/readyz
@@ -14,6 +14,9 @@ services:
     container_name: purev2
     restart: unless-stopped
     init: true
+    depends_on:
+      redis:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
     # Do not publish 8081 / REST proxy.
@@ -71,6 +74,8 @@ services:
       DASHBOARD_API_PORT: ${DASHBOARD_API_PORT:-8082}
       DASHBOARD_API_AUTHORIZATION: ${DASHBOARD_API_AUTHORIZATION:?set DASHBOARD_API_AUTHORIZATION in .env}
       DASHBOARD_API_BODY_LIMIT_BYTES: ${DASHBOARD_API_BODY_LIMIT_BYTES:-32768}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      VOICE_STATS_CHECKPOINT_INTERVAL_MS: ${VOICE_STATS_CHECKPOINT_INTERVAL_MS:-300000}
       SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-30000}
     security_opt:
       - no-new-privileges:true
@@ -124,6 +129,27 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  redis:
+    image: redis:7.4.5-alpine
+    user: redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--dir", "/tmp", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    # Intentionally no ports: Redis is reachable only on the private Compose network.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 160m
+    cpus: 0.25
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     security_opt:
       - no-new-privileges:true
     cap_drop:

@@ -9,6 +9,16 @@ const gatewayPayloadSchema = z.object({
   d: z.unknown().optional(),
 });
 
+const statsMetricsSchema = z.object({
+  sessionOpens: z.number().int().nonnegative(),
+  sessionCloses: z.number().int().nonnegative(),
+  deduplicatedEvents: z.number().int().nonnegative(),
+  reconciliationFindings: z.number().int().nonnegative(),
+  redisFailures: z.number().int().nonnegative(),
+  renders: z.number().int().nonnegative(),
+  renderFailures: z.number().int().nonnegative(),
+});
+
 export const workerHelloMessageSchema = z.object({
   type: z.literal("workerHello"),
   workerId: z.number().int().min(0).max(1),
@@ -21,6 +31,8 @@ export const workerReadyMessageSchema = z.object({
   workerId: z.number().int().min(0).max(1),
   mongoReady: z.boolean(),
   modulesReady: z.boolean(),
+  statsReady: z.boolean(),
+  statsMetrics: statsMetricsSchema,
   at: z.string().datetime(),
 });
 
@@ -31,6 +43,8 @@ export const heartbeatMessageSchema = z.object({
   at: z.string().datetime(),
   inFlightCount: z.number().int().nonnegative(),
   mongoReady: z.boolean(),
+  statsReady: z.boolean(),
+  statsMetrics: statsMetricsSchema,
 });
 
 export const gatewayEventMessageSchema = z.object({
@@ -41,6 +55,32 @@ export const gatewayEventMessageSchema = z.object({
   payload: gatewayPayloadSchema,
   enqueuedAt: z.string().datetime(),
   attempt: z.number().int().min(1).default(1),
+});
+
+const voiceSnapshotStateSchema = z.object({
+  userId: snowflakeSchema,
+  channelId: snowflakeSchema,
+});
+
+export const voiceStateSnapshotMessageSchema = z.object({
+  type: z.literal("voiceStateSnapshot"),
+  snapshotId: z.string().uuid(),
+  workerId: z.number().int().min(0).max(1),
+  guilds: z.array(z.object({
+    guildId: snowflakeSchema,
+    states: z.array(voiceSnapshotStateSchema).max(10_000),
+  })).max(10_000),
+  at: z.string().datetime(),
+});
+
+export const voiceStateSnapshotAckMessageSchema = z.object({
+  type: z.literal("voiceStateSnapshotAck"),
+  snapshotId: z.string().uuid(),
+  workerId: z.number().int().min(0).max(1),
+  ok: z.boolean(),
+  statsReady: z.boolean(),
+  at: z.string().datetime(),
+  error: z.string().min(1).max(2_000).optional(),
 });
 
 export const eventAckMessageSchema = z.object({
@@ -77,6 +117,8 @@ export const ipcMessageSchema = z.discriminatedUnion("type", [
   workerReadyMessageSchema,
   heartbeatMessageSchema,
   gatewayEventMessageSchema,
+  voiceStateSnapshotMessageSchema,
+  voiceStateSnapshotAckMessageSchema,
   eventAckMessageSchema,
   eventNackMessageSchema,
   shutdownMessageSchema,
@@ -87,6 +129,8 @@ export type WorkerHelloMessage = z.infer<typeof workerHelloMessageSchema>;
 export type WorkerReadyMessage = z.infer<typeof workerReadyMessageSchema>;
 export type HeartbeatMessage = z.infer<typeof heartbeatMessageSchema>;
 export type GatewayEventMessage = z.infer<typeof gatewayEventMessageSchema>;
+export type VoiceStateSnapshotMessage = z.infer<typeof voiceStateSnapshotMessageSchema>;
+export type VoiceStateSnapshotAckMessage = z.infer<typeof voiceStateSnapshotAckMessageSchema>;
 export type EventAckMessage = z.infer<typeof eventAckMessageSchema>;
 export type EventNackMessage = z.infer<typeof eventNackMessageSchema>;
 export type ShutdownMessage = z.infer<typeof shutdownMessageSchema>;

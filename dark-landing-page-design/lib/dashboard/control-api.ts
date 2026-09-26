@@ -3,7 +3,7 @@ import "server-only"
 import { z } from "zod"
 
 import type { DiscordGuild, DiscordViewer } from "@/lib/auth/discord"
-import type { DashboardSnapshot } from "@/lib/dashboard/contracts"
+import type { ActivityRangeDays, DashboardSnapshot } from "@/lib/dashboard/contracts"
 
 interface ControlSnapshot {
   readonly guildId: string
@@ -25,7 +25,10 @@ interface ControlSnapshot {
   readonly summary: {
     readonly activeChannels: number
     readonly connectedMembers: number
+    readonly voiceSeconds: number
+    readonly voiceSessions: number
   }
+  readonly voiceActivity: readonly { readonly day: string; readonly seconds: number }[]
 }
 
 interface ControlResponse {
@@ -58,7 +61,13 @@ const controlSnapshotSchema = z.object({
     hidden: z.boolean(),
     createdAt: z.string(),
   })),
-  summary: z.object({ activeChannels: z.number(), connectedMembers: z.number() }),
+  summary: z.object({
+    activeChannels: z.number(),
+    connectedMembers: z.number(),
+    voiceSeconds: z.number(),
+    voiceSessions: z.number(),
+  }),
+  voiceActivity: z.array(z.object({ day: z.string(), seconds: z.number() })),
 })
 const controlResponseSchema = z.object({
   ok: z.boolean(),
@@ -112,7 +121,20 @@ function guildView(guild: DiscordGuild): DashboardSnapshot["guild"] {
   }
 }
 
-function mapSnapshot(raw: ControlSnapshot, selectedGuild: DiscordGuild, guilds: readonly DiscordGuild[], viewer: DiscordViewer): DashboardSnapshot {
+function activityLabel(day: string, days: ActivityRangeDays): string {
+  const value = new Date(`${day}T00:00:00.000Z`)
+  return new Intl.DateTimeFormat("en-US", days === 7
+    ? { weekday: "short", timeZone: "UTC" }
+    : { month: "short", day: "numeric", timeZone: "UTC" }).format(value)
+}
+
+function mapSnapshot(
+  raw: ControlSnapshot,
+  selectedGuild: DiscordGuild,
+  guilds: readonly DiscordGuild[],
+  viewer: DiscordViewer,
+  days: ActivityRangeDays = 7,
+): DashboardSnapshot {
   const now = Date.now()
   return {
     viewer: {
@@ -133,7 +155,10 @@ function mapSnapshot(raw: ControlSnapshot, selectedGuild: DiscordGuild, guilds: 
       createdMinutesAgo: Math.max(0, Math.floor((now - Date.parse(channel.createdAt)) / 60_000)),
     })),
     activity: [],
-    voiceActivity: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label) => ({ label, minutes: 0 })),
+    voiceActivity: raw.voiceActivity.map((point) => ({
+      label: activityLabel(point.day, days),
+      minutes: Math.round(point.seconds / 60),
+    })),
     configuration: {
       enabled: raw.configuration.enabled,
       lobbyChannelName: raw.configuration.lobbyChannelName,
@@ -146,8 +171,10 @@ function mapSnapshot(raw: ControlSnapshot, selectedGuild: DiscordGuild, guilds: 
     summary: {
       activeChannels: raw.summary.activeChannels,
       connectedMembers: raw.summary.connectedMembers,
-      channelsCreatedToday: 0,
-      averageSessionMinutes: 0,
+      voiceSessions: raw.summary.voiceSessions,
+      averageSessionMinutes: raw.summary.voiceSessions === 0
+        ? 0
+        : Math.round(raw.summary.voiceSeconds / raw.summary.voiceSessions / 60),
     },
   }
 }
@@ -156,11 +183,12 @@ export async function getControlDashboardSnapshot(
   guildId: string,
   guilds: readonly DiscordGuild[],
   viewer: DiscordViewer,
+  days: ActivityRangeDays = 7,
 ): Promise<DashboardSnapshot> {
   const selectedGuild = guilds.find((guild) => guild.id === guildId)
   if (!selectedGuild) throw new Error("Guild is not authorized")
-  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/snapshot`)
-  return mapSnapshot(snapshot, selectedGuild, guilds, viewer)
+  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/snapshot?days=${days}`)
+  return mapSnapshot(snapshot, selectedGuild, guilds, viewer, days)
 }
 
 export async function updateControlDashboardConfiguration(
@@ -169,13 +197,14 @@ export async function updateControlDashboardConfiguration(
   guilds: readonly DiscordGuild[],
   viewer: DiscordViewer,
   requestId: string,
+  days: ActivityRangeDays = 7,
 ): Promise<DashboardSnapshot> {
   const selectedGuild = guilds.find((guild) => guild.id === guildId)
   if (!selectedGuild) throw new Error("Guild is not authorized")
-  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/config`, {
+  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/config?days=${days}`, {
     method: "PUT",
     headers: { "content-type": "application/json", "x-request-id": requestId },
     body: JSON.stringify(update),
   })
-  return mapSnapshot(snapshot, selectedGuild, guilds, viewer)
+  return mapSnapshot(snapshot, selectedGuild, guilds, viewer, days)
 }

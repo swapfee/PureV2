@@ -116,6 +116,7 @@ export function createInteractionDispatcher(
     readonly setup?: {
       execute(interaction: InteractionCreatePayload): Promise<void>;
     };
+    readonly stats?: { execute(interaction: InteractionCreatePayload): Promise<void> };
     readonly voicePanel?: {
       handles(interaction: InteractionCreatePayload): boolean;
       execute(interaction: InteractionCreatePayload): Promise<void>;
@@ -167,6 +168,7 @@ export function createInteractionDispatcher(
           discord,
           ...(services?.vc ? { vc: services.vc } : {}),
           ...(services?.setup ? { setup: services.setup } : {}),
+          ...(services?.stats ? { stats: services.stats } : {}),
         },
         interaction,
       );
@@ -187,6 +189,7 @@ export function wireBotEvents(
       applicationId: payload.applicationId.toString(),
       guildIds: payload.guilds.map((guildId) => guildId.toString()),
     };
+    context.stats?.expectGuilds(readyPayload.guildIds);
     await event.execute(context, readyPayload);
   };
 
@@ -270,12 +273,13 @@ export function wireBotEvents(
       ...(typeof displayNameRaw === "string" && displayNameRaw.trim().length > 0
         ? { displayName: displayNameRaw.trim() }
         : {}),
+      ...(context.currentGatewaySequence === undefined ? {} : { gatewaySequence: context.currentGatewaySequence }),
     };
     await event.execute(context, payload);
   };
 
-  bot.events.guildCreate = (guild) => {
-    if (!context.j2c) return;
+  bot.events.guildCreate = async (guild) => {
+    if (!context.j2c && !context.stats) return;
     const guildId = guild.id.toString();
     const voiceStatesRaw = Reflect.get(guild, "voiceStates");
     const seeded: { userId: string; channelId: string | null }[] = [];
@@ -291,22 +295,28 @@ export function wireBotEvents(
         const userId = Reflect.get(state, "userId");
         const channelId = Reflect.get(state, "channelId");
         if (userId === undefined) continue;
+        const rawMember = Reflect.get(state, "member");
+        const rawUser = typeof rawMember === "object" && rawMember !== null ? Reflect.get(rawMember, "user") : undefined;
         seeded.push({
           userId: String(userId),
           channelId: channelId === undefined || channelId === null ? null : String(channelId),
+          ...(typeof rawUser === "object" && rawUser !== null && Reflect.get(rawUser, "bot") === true ? { isBot: true } : {}),
         });
       }
     }
-    context.j2c.occupancy.seedGuildVoiceStates(guildId, seeded);
-    context.j2c.occupancy.markReady();
+    context.j2c?.occupancy.seedGuildVoiceStates(guildId, seeded);
+    context.j2c?.occupancy.markReady();
+    if (context.stats) {
+      await context.stats.reconcileGuild(guildId, seeded.map((state) => ({ guildId, ...state })));
+    }
     // Restart: empty temp channels get no leave event — schedule deletion from the seed.
-    void context.j2c.scheduleEmptyChannelDeletions(guildId).catch((error: unknown) => {
+    void context.j2c?.scheduleEmptyChannelDeletions(guildId).catch((error: unknown) => {
       context.logger.error("Failed to schedule empty-channel deletions after guild seed", {
         guildId,
         error,
       });
     });
-    context.j2c.scheduleEmptyChannelDeletionResweep(guildId);
+    context.j2c?.scheduleEmptyChannelDeletionResweep(guildId);
   };
 }
 

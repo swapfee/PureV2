@@ -40,6 +40,14 @@ const databaseSchema = z.object({
   MONGODB_WAIT_QUEUE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(5_000),
 });
 
+const statsSchema = z.object({
+  REDIS_URL: z.string().refine(
+    (value) => value.startsWith("redis://") || value.startsWith("rediss://"),
+    "must use the redis:// or rediss:// scheme",
+  ).default("redis://127.0.0.1:6379"),
+  VOICE_STATS_CHECKPOINT_INTERVAL_MS: z.coerce.number().int().min(60_000).max(3_600_000).default(300_000),
+});
+
 const restProxySchema = z.object({
   REST_PROXY_HOST: loopbackHostSchema.default("127.0.0.1"),
   REST_PROXY_PORT: z.coerce.number().int().min(1).max(65_535).default(8081),
@@ -84,6 +92,7 @@ const coordinatorSchema = commonSchema
   })
   .extend(restProxySchema.shape)
   .extend(dashboardApiSchema.shape)
+  .extend(statsSchema.shape)
   .extend(workerLifecycleSchema.shape)
   .superRefine((value, context) => {
     if (value.WORKER_HEARTBEAT_TIMEOUT_MS <= value.WORKER_HEARTBEAT_INTERVAL_MS) {
@@ -136,6 +145,8 @@ const workerSchema = commonSchema
     REST_PROXY_PORT: restProxySchema.shape.REST_PROXY_PORT,
     REST_PROXY_AUTHORIZATION: restProxySchema.shape.REST_PROXY_AUTHORIZATION,
     PUREV2_REST_PROXY_BASE_URL: z.string().url().optional(),
+    REDIS_URL: statsSchema.shape.REDIS_URL,
+    VOICE_STATS_CHECKPOINT_INTERVAL_MS: statsSchema.shape.VOICE_STATS_CHECKPOINT_INTERVAL_MS,
   })
   .superRefine((value, context) => {
     if (value.BOT_WORKER_ID >= value.BOT_WORKER_COUNT) {
@@ -232,6 +243,8 @@ export function buildWorkerProcessEnv(
     REST_PROXY_PORT: String(config.REST_PROXY_PORT),
     REST_PROXY_AUTHORIZATION: config.REST_PROXY_AUTHORIZATION,
     PUREV2_REST_PROXY_BASE_URL: restProxyUrl,
+    REDIS_URL: config.REDIS_URL,
+    VOICE_STATS_CHECKPOINT_INTERVAL_MS: String(config.VOICE_STATS_CHECKPOINT_INTERVAL_MS),
   };
 }
 

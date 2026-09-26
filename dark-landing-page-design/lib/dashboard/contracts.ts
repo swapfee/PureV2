@@ -1,3 +1,7 @@
+import { z } from "zod"
+
+export type ActivityRangeDays = 7 | 30
+
 export type DashboardSection =
   | "overview"
   | "join-to-create"
@@ -63,7 +67,7 @@ export interface DashboardSnapshot {
   readonly summary: {
     readonly activeChannels: number
     readonly connectedMembers: number
-    readonly channelsCreatedToday: number
+    readonly voiceSessions: number
     readonly averageSessionMinutes: number
   }
 }
@@ -93,8 +97,7 @@ export const dashboardSnapshotSchema = z.object({
     interfaceEnabled: z.boolean(),
   }),
   summary: z.object({
-    activeChannels: z.number(), connectedMembers: z.number(), channelsCreatedToday: z.number(),
+    activeChannels: z.number(), connectedMembers: z.number(), voiceSessions: z.number(),
     averageSessionMinutes: z.number(),
   }),
 })
-import { z } from "zod"

@@ -2,6 +2,10 @@ import { CreationReservationModel } from "./creation-reservation.ts";
 import { GuildConfigModel } from "./guild-config.ts";
 import { OwnerBlockListModel } from "./owner-block-list.ts";
 import { TemporaryChannelModel } from "./temporary-channel.ts";
+import { VoiceDailyStatsModel } from "./voice-daily-stats.ts";
+import { VoiceMemberStatsModel } from "./voice-member-stats.ts";
+import { VoiceStatsEventModel } from "./voice-stats-event.ts";
+import { VoiceStatsSessionModel } from "./voice-stats-session.ts";
 
 export interface IndexSyncResult {
   readonly modelName: string;
@@ -33,6 +37,10 @@ const defaultModels: readonly IndexableModel[] = [
   TemporaryChannelModel,
   CreationReservationModel,
   OwnerBlockListModel,
+  VoiceStatsSessionModel,
+  VoiceMemberStatsModel,
+  VoiceDailyStatsModel,
+  VoiceStatsEventModel,
 ];
 
 /**

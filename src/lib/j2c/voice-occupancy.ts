@@ -25,6 +25,14 @@ export type OccupancyLookup =
   | { readonly kind: "known"; readonly userIds: readonly string[] }
   | { readonly kind: "unknown" };
 
+export interface GuildVoiceOccupancySnapshot {
+  readonly guildId: string;
+  readonly states: readonly {
+    readonly userId: string;
+    readonly channelId: string;
+  }[];
+}
+
 export interface VoiceOccupancyTracker {
   apply(observation: VoiceStateObservation): void;
   seedGuildVoiceStates(
@@ -38,6 +46,7 @@ export interface VoiceOccupancyTracker {
   isReady(): boolean;
   clear(): void;
   trackedGuildCount(): number;
+  snapshotGuilds(): readonly GuildVoiceOccupancySnapshot[];
 }
 
 function userKey(guildId: string, userId: string): string {
@@ -129,6 +138,23 @@ export function createVoiceOccupancyTracker(): VoiceOccupancyTracker {
 
     trackedGuildCount() {
       return seededGuilds.size;
+    },
+
+    snapshotGuilds() {
+      const snapshots: GuildVoiceOccupancySnapshot[] = [];
+      for (const guildId of seededGuilds) {
+        const states: { userId: string; channelId: string }[] = [];
+        const prefix = `${guildId}:`;
+        for (const [key, value] of byUser) {
+          if (!key.startsWith(prefix) || value.channelId === null) continue;
+          states.push({
+            userId: key.slice(prefix.length),
+            channelId: value.channelId,
+          });
+        }
+        snapshots.push({ guildId, states });
+      }
+      return snapshots;
     },
   };
 }

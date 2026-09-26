@@ -15,6 +15,13 @@ export type { CreationReservationRecord, ReservationStatus } from "./creation-re
 export { CreationReservationModel, RESERVATION_STATUSES } from "./creation-reservation.ts";
 export type { OwnerBlockListRecord } from "./owner-block-list.ts";
 export { OwnerBlockListModel, OWNER_BLOCK_LIST_MAX } from "./owner-block-list.ts";
+export { VoiceStatsSessionModel, VOICE_STATS_SESSION_STATUSES } from "./voice-stats-session.ts";
+export type { VoiceStatsSessionRecord, VoiceStatsSessionStatus } from "./voice-stats-session.ts";
+export { VoiceMemberStatsModel } from "./voice-member-stats.ts";
+export type { VoiceMemberStatsRecord } from "./voice-member-stats.ts";
+export { VoiceDailyStatsModel } from "./voice-daily-stats.ts";
+export type { VoiceDailyStatsRecord } from "./voice-daily-stats.ts";
+export { VoiceStatsEventModel } from "./voice-stats-event.ts";
 export { synchronizeJ2cIndexes, listJ2cIndexes, verifyJ2cIndexes } from "./index-sync.ts";
 export type { IndexListingResult, ListedMongoIndex } from "./index-sync.ts";
 export {

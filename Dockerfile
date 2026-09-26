@@ -2,13 +2,19 @@
 # Build: docker build -t purev2:local .
 # Run via compose.yaml (do not publish REST proxy port 8081).
 
-FROM oven/bun:1.4.2-debian AS deps
+FROM oven/bun:1.4.2-debian AS runtime-base
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
+
+FROM runtime-base AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 FROM deps AS build
 COPY tsconfig.json .oxlintrc.json ./
+COPY Dockerfile compose.yaml .dockerignore ./
 COPY index.ts ./
 COPY src ./src
 COPY tests ./tests
@@ -17,14 +23,14 @@ RUN bun run typecheck
 RUN bun run lint
 RUN bun test
 
-FROM oven/bun:1.4.2-debian AS production
+FROM runtime-base AS production
 WORKDIR /app
 
 # Dedicated non-root user
 RUN groupadd --system purev2 \
   && useradd --system --gid purev2 --home-dir /app --shell /usr/sbin/nologin purev2
 
-COPY package.json bun.lock ./
+COPY --from=build /app/package.json /app/bun.lock ./
 RUN bun install --frozen-lockfile --production \
   && chown -R purev2:purev2 /app
 

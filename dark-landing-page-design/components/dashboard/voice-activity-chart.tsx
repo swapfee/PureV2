@@ -51,7 +51,7 @@ export function VoiceActivityChart({ data }: { data: readonly ActivityPoint[] })
         <XAxis
           axisLine={false}
           dataKey="label"
-          interval={0}
+          interval={data.length > 14 ? 4 : 0}
           padding={{ left: 12, right: 8 }}
           tick={{ fill: "rgba(255,255,255,0.46)", fontSize: 10 }}
           tickLine={false}

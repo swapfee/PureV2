@@ -27,6 +27,7 @@
     "commands:register:global": "bun run src/cli/register-commands.ts -- --global"
   },
   "dependencies": {
+    "@napi-rs/canvas": "1.0.9",
     "discordeno": "21.0.0",
     "mongoose": "9.10.1",
     "zod": "4.6.5"

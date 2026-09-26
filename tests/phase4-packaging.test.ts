@@ -24,6 +24,8 @@ import {
 import { registerGracefulShutdown } from "../index.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { CommandModule } from "../src/handlers/types.ts";
+import { INDEX_APPLY_MODEL_NAMES } from "../src/cli/indexes.ts";
+import { MODEL_COLLECTIONS } from "../src/lib/j2c/index-plan.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -133,10 +135,13 @@ describe("Docker packaging artifacts", () => {
   test("Dockerfile pins Bun 1.4.2, non-root, healthcheck, no REST EXPOSE", () => {
     const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
     expect(dockerfile).toContain("oven/bun:1.4.2");
+    expect(dockerfile).toContain("fonts-dejavu-core");
     expect(dockerfile).not.toContain(":latest");
     expect(dockerfile).toContain("--frozen-lockfile");
     expect(dockerfile).toContain("bun run typecheck");
     expect(dockerfile).toContain("bun run lint");
+    expect(dockerfile).toContain("COPY Dockerfile compose.yaml .dockerignore ./");
+    expect(dockerfile).toContain("COPY --from=build /app/package.json /app/bun.lock ./");
     expect(dockerfile).toContain("USER purev2");
     expect(dockerfile).toContain("EXPOSE 3000");
     expect(dockerfile).not.toMatch(/EXPOSE\s+8081/);
@@ -162,17 +167,27 @@ describe("Docker packaging artifacts", () => {
     expect(compose).not.toContain("privileged: true");
     expect(compose).not.toContain("/var/run/docker.sock");
     expect(compose).not.toMatch(/^\s*mongo:/im);
-    expect(compose).not.toMatch(/^\s*redis:/im);
+    expect(compose).toMatch(/^\s{2}redis:/m);
+    const redisBlock = compose.split(/^\s{2}redis:/m)[1] ?? "";
+    expect(redisBlock).not.toMatch(/^\s{4}ports:/m);
+    expect(redisBlock).toContain("--maxmemory-policy\", \"noeviction");
   });
 
-  test(".dockerignore excludes secrets, git, and tests from production context patterns", () => {
+  test(".dockerignore excludes secrets and git without blocking build-stage tests", () => {
     const ignore = readFileSync(join(root, ".dockerignore"), "utf8");
     expect(ignore).toContain(".env");
     expect(ignore).toContain(".git");
+    expect(ignore).not.toMatch(/^tests\/?$/m);
   });
 });
 
 describe("index maintenance CLI gates", () => {
+  test("every required index model has a collection and apply target", () => {
+    const requiredModels = Object.keys(REQUIRED_J2C_INDEX_SPECS).toSorted();
+    expect(Object.keys(MODEL_COLLECTIONS).toSorted()).toEqual(requiredModels);
+    expect(INDEX_APPLY_MODEL_NAMES.map(String).toSorted()).toEqual(requiredModels);
+  });
+
   test("default parse is dry-run", () => {
     const args = parseIndexCliArgs([]);
     expect(args.apply).toBe(false);
@@ -412,16 +427,17 @@ describe("graceful SIGTERM boundary", () => {
 });
 
 describe("logger redaction of production environment values", () => {
-  test("redacts Discord token, REST authorization, and Mongo URI", () => {
+  test("redacts Discord token, REST authorization, Mongo URI, and Redis credentials", () => {
     const lines: string[] = [];
     const token = "prod-discord-token-abc";
     const auth = "prod-rest-auth-0123456789abcdef";
     const mongo = "mongodb+srv://user:secretpass@cluster.example/purev2";
+    const redis = "redis://stats-user:redis-secret@redis.example:6379";
     const logger = createLogger({
       service: "purev2",
       role: "coordinator",
       level: "info",
-      sensitiveValues: [token, auth, mongo],
+      sensitiveValues: [token, auth, mongo, redis],
       write: (line) => lines.push(line),
     });
 
@@ -429,6 +445,7 @@ describe("logger redaction of production environment values", () => {
       DISCORD_TOKEN: token,
       REST_PROXY_AUTHORIZATION: auth,
       MONGODB_URI: mongo,
+      REDIS_URL: redis,
       HEALTH_HOST: "0.0.0.0",
     });
 
@@ -436,6 +453,7 @@ describe("logger redaction of production environment values", () => {
     expect(line.includes(token)).toBe(false);
     expect(line.includes(auth)).toBe(false);
     expect(line.includes("secretpass")).toBe(false);
+    expect(line.includes("redis-secret")).toBe(false);
     expect(line.includes("[REDACTED]")).toBe(true);
     expect(line.includes("0.0.0.0")).toBe(true);
   });

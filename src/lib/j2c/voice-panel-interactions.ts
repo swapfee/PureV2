@@ -3,6 +3,7 @@ import { ChannelTypes } from "discordeno";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
 import { ACTION_EMOJIS, failureResponse, successResponse } from "./action-response.ts";
+import { beginEphemeralProgress } from "./interaction-progress.ts";
 import { applyOwnerHandoffPresentation } from "./owner-handoff.ts";
 import type { GuildConfigRepository, OwnerBlockListRepository, TemporaryChannelRepository } from "./repositories.ts";
 import {
@@ -63,9 +64,22 @@ const PANEL_NOT_IN_MANAGED_MESSAGE =
   "You must be connected to a managed voice channel.";
 
 interface InteractionReplyState {
-  deferred: boolean;
+  acknowledged: boolean;
   answered: boolean;
 }
+
+const PANEL_PROGRESS_MESSAGES: Readonly<Record<VoicePanelAction, string>> = {
+  lock: "Locking voice channel...",
+  unlock: "Unlocking voice channel...",
+  hide: "Hiding voice channel...",
+  unhide: "Making voice channel visible...",
+  rename: "Renaming voice channel...",
+  limit: "Updating voice channel limit...",
+  transfer: "Transferring voice channel ownership...",
+  claim: "Claiming voice channel...",
+  info: "Loading voice channel information...",
+  delete: "Preparing voice channel deletion...",
+};
 
 function normalizeChannelName(raw: string): string | undefined {
   const trimmed = raw.trim().replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ");
@@ -79,7 +93,7 @@ async function replyEphemeral(
   replyState: InteractionReplyState,
   message: ReturnType<typeof successResponse>,
 ): Promise<void> {
-  if (replyState.deferred) {
+  if (replyState.acknowledged) {
     await discord.editInteractionResponse({
       applicationId: interaction.applicationId,
       interactionToken: interaction.token,
@@ -97,17 +111,18 @@ async function replyEphemeral(
   replyState.answered = true;
 }
 
-async function deferEphemeral(
+async function beginPanelProgress(
   discord: DiscordApiPort,
   interaction: InteractionCreatePayload,
   replyState: InteractionReplyState,
+  message: string,
 ): Promise<void> {
-  await discord.deferInteraction({
-    interactionId: interaction.id,
-    interactionToken: interaction.token,
-    ephemeral: true,
+  await beginEphemeralProgress({
+    discord,
+    interaction,
+    message,
   });
-  replyState.deferred = true;
+  replyState.acknowledged = true;
 }
 
 async function deferUpdate(
@@ -119,7 +134,7 @@ async function deferUpdate(
     interactionId: interaction.id,
     interactionToken: interaction.token,
   });
-  replyState.deferred = true;
+  replyState.acknowledged = true;
 }
 
 /**
@@ -242,7 +257,7 @@ export function createVoicePanelInteractionHandler(options: {
       const customId = interaction.customId;
       if (!customId) return;
       const parts = parseColonId(customId);
-      const replyState: InteractionReplyState = { deferred: false, answered: false };
+      const replyState: InteractionReplyState = { acknowledged: false, answered: false };
 
       try {
         if (parts[0] === GLOBAL_VOICE_PANEL_PREFIX) {
@@ -472,7 +487,12 @@ async function handlePanelButton(input: {
     return;
   }
 
-  await deferEphemeral(input.discord, input.interaction, input.replyState);
+  await beginPanelProgress(
+    input.discord,
+    input.interaction,
+    input.replyState,
+    PANEL_PROGRESS_MESSAGES[action],
+  );
 
   const access = await requireManagedConnected({
     interaction: input.interaction,
@@ -769,7 +789,12 @@ async function handleModalSubmit(input: {
   if (!action || !channelId || extra || (source !== undefined && source !== "global")) return;
   const allowExternalPanel = source === "global";
 
-  await deferEphemeral(input.discord, input.interaction, input.replyState);
+  await beginPanelProgress(
+    input.discord,
+    input.interaction,
+    input.replyState,
+    action === "rename" ? PANEL_PROGRESS_MESSAGES.rename : PANEL_PROGRESS_MESSAGES.limit,
+  );
 
   const access = await requireManagedConnected({
     interaction: input.interaction,

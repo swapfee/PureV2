@@ -27,6 +27,8 @@ describe("parseIpcMessage", () => {
         at: "2026-01-01T00:00:00.000Z",
         inFlightCount: 0,
         mongoReady: true,
+        statsReady: true,
+        statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
       }).ok,
     ).toBe(true);
 
@@ -36,9 +38,40 @@ describe("parseIpcMessage", () => {
         workerId: 0,
         mongoReady: true,
         modulesReady: true,
+        statsReady: true,
+        statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
         at: "2026-01-01T00:00:00.000Z",
       }).ok,
     ).toBe(true);
+  });
+
+  test("accepts bounded coordinator voice snapshots and worker acknowledgments", () => {
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    expect(parseIpcMessage({
+      type: "voiceStateSnapshot",
+      snapshotId,
+      workerId: 0,
+      guilds: [{
+        guildId: "123456789012345678",
+        states: [{ userId: "223456789012345678", channelId: "323456789012345678" }],
+      }],
+      at: "2026-01-01T00:00:00.000Z",
+    }).ok).toBe(true);
+    expect(parseIpcMessage({
+      type: "voiceStateSnapshotAck",
+      snapshotId,
+      workerId: 0,
+      ok: true,
+      statsReady: true,
+      at: "2026-01-01T00:00:01.000Z",
+    }).ok).toBe(true);
+    expect(parseIpcMessage({
+      type: "voiceStateSnapshot",
+      snapshotId,
+      workerId: 2,
+      guilds: [],
+      at: "2026-01-01T00:00:00.000Z",
+    }).ok).toBe(false);
   });
 
   test("rejects malformed and protocol-mismatched messages", () => {

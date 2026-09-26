@@ -26,6 +26,7 @@ export interface FakeDiscordChannel {
 
 export interface FakeDiscordGuild {
   id: string;
+  name?: string;
   premiumTier: number;
   features: string[];
 }
@@ -37,7 +38,7 @@ export interface FakeDiscordControls {
   /** guildId:userId -> server mute */
   readonly serverMuteByUser: Map<string, boolean>;
   readonly users: Map<string, { id: string; bot: boolean; username?: string; globalName?: string }>;
-  readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string }>;
+  readonly members: Map<string, { id: string; bot: boolean; nick?: string; username?: string; globalName?: string; avatarUrl?: string }>;
   readonly createCalls: CreateVoiceChannelRequest[];
   readonly positionCalls: {
     guildId: string;
@@ -94,6 +95,8 @@ export interface FakeDiscordControls {
     content?: string;
     embeds?: readonly { description: string; color?: number; title?: string }[];
     components?: readonly unknown[];
+    files?: readonly { readonly name: string; readonly contentType: string; readonly data: Uint8Array }[];
+    requestId?: string;
   }[];
   readonly responses: {
     interactionId: string;
@@ -206,6 +209,8 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: request.embeds }),
         ...(request.components === undefined ? {} : { components: request.components }),
+        ...(request.files === undefined ? {} : { files: request.files }),
+        ...(request.requestId === undefined ? {} : { requestId: request.requestId }),
       });
     },
 
@@ -325,6 +330,7 @@ export function createFakeDiscord(seed?: Partial<FakeDiscordControls>): {
         kind: "found",
         value: {
           id: guild.id,
+          ...(guild.name === undefined ? {} : { name: guild.name }),
           premiumTier: guild.premiumTier,
           features: [...guild.features],
         },

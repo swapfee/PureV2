@@ -2,6 +2,8 @@ import {
   ChannelTypes,
   createBot,
   InteractionResponseTypes,
+  avatarUrl as discordAvatarUrl,
+  memberAvatarUrl as discordMemberAvatarUrl,
   type MessageComponents,
 } from "discordeno";
 
@@ -147,14 +149,28 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
     },
 
     async editInteractionResponse(request) {
-      await bot.helpers.editOriginalInteractionResponse(request.interactionToken, {
+      const body = {
         ...(request.content === undefined ? {} : { content: request.content }),
         ...(request.embeds === undefined ? {} : { embeds: [...request.embeds] }),
         ...(request.components === undefined
           ? {}
           : { components: toMessageComponents(request.components) }),
         ...(request.flags === undefined ? {} : { flags: request.flags }),
-      });
+      };
+      const files = request.files?.map((file) => ({ name: file.name, blob: new Blob([file.data], { type: file.contentType }) }));
+      if (files) {
+        await bot.rest.makeRequest(
+          "PATCH",
+          `/webhooks/${request.applicationId}/${request.interactionToken}/messages/@original`,
+          {
+            body,
+            files,
+            ...(request.requestId ? { headers: { [REST_REQUEST_ID_HEADER]: request.requestId } } : {}),
+          },
+        );
+      } else {
+        await bot.helpers.editOriginalInteractionResponse(request.interactionToken, body);
+      }
     },
 
     async showModal(request) {
@@ -295,6 +311,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
       try {
         const guild = await bot.rest.makeRequest<{
           id: string | number | bigint;
+          name?: string;
           premium_tier?: number;
           features?: string[];
         }>("GET", bot.rest.routes.guilds.guild(request.guildId));
@@ -302,6 +319,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
           kind: "found" as const,
           value: {
             id: String(guild.id),
+            ...(typeof guild.name === "string" ? { name: guild.name } : {}),
             premiumTier: typeof guild.premium_tier === "number" ? guild.premium_tier : 0,
             features: Array.isArray(guild.features) ? guild.features : [],
           },
@@ -399,13 +417,31 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
         const memberUser = Reflect.get(member, "user");
         let username: string | undefined;
         let globalName: string | undefined;
+        let avatarUrl: string | undefined;
         let isBot = false;
         if (typeof memberUser === "object" && memberUser !== null) {
           const usernameRaw = Reflect.get(memberUser, "username");
           const globalNameRaw = Reflect.get(memberUser, "globalName");
+          const discriminatorRaw = Reflect.get(memberUser, "discriminator");
+          const userAvatarRaw = Reflect.get(memberUser, "avatar");
+          const memberAvatarRaw = Reflect.get(member, "avatar");
           const botRaw = Reflect.get(memberUser, "bot");
           if (typeof usernameRaw === "string") username = usernameRaw;
           if (typeof globalNameRaw === "string") globalName = globalNameRaw;
+          const discriminator = typeof discriminatorRaw === "string" ? discriminatorRaw : "0";
+          if (typeof memberAvatarRaw === "bigint") {
+            avatarUrl = discordMemberAvatarUrl(request.guildId, request.userId, {
+              avatar: memberAvatarRaw,
+              size: 256,
+              format: "png",
+            });
+          } else {
+            avatarUrl = discordAvatarUrl(request.userId, discriminator, {
+              avatar: typeof userAvatarRaw === "bigint" ? userAvatarRaw : undefined,
+              size: 256,
+              format: "png",
+            });
+          }
           isBot = typeof botRaw === "boolean" ? botRaw : false;
         }
         return {
@@ -416,6 +452,7 @@ export function createWorkerBot(config: WorkerConfig, logger: Logger): WorkerBot
             ...(typeof nickRaw === "string" ? { nick: nickRaw } : {}),
             ...(username === undefined ? {} : { username }),
             ...(globalName === undefined ? {} : { globalName }),
+            ...(avatarUrl === undefined ? {} : { avatarUrl }),
           },
         };
       } catch (error) {

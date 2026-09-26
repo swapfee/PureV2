@@ -7,12 +7,14 @@ import {
   createMemoryTemporaryChannelRepository,
 } from "../src/lib/j2c/memory-repositories.ts";
 import type { Logger } from "../src/lib/logger.ts";
+import { createMemoryVoiceStatsRepository } from "../src/lib/stats/memory-repository.ts";
 
 const guildId = "1539918723396407357";
 const lobbyChannelId = "1539918723396407358";
 const categoryId = "1539918723396407359";
 const temporaryChannelId = "1539918723396407360";
 const authorization = "dashboard-test-authorization-secret";
+const now = new Date("2026-09-25T12:00:00.000Z");
 
 const logger: Logger = {
   debug() {}, info() {}, warn() {}, error() {}, fatal() {}, child() { return this; },
@@ -25,6 +27,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function fixture(ready = true) {
   const configs = createMemoryGuildConfigRepository();
   const channels = createMemoryTemporaryChannelRepository();
+  const stats = createMemoryVoiceStatsRepository();
   await configs.upsert({
     guildId,
     enabled: true,
@@ -52,6 +55,28 @@ async function fixture(ready = true) {
   ] as const) {
     controls.channels.set(id, { id, name, guildId, permissionOverwrites: [] });
   }
+  stats.daily.set(`${guildId}:1539918723396407362:2026-09-24T00:00:00.000Z`, {
+    guildId,
+    userId: "1539918723396407362",
+    day: new Date("2026-09-24T00:00:00.000Z"),
+    durationSeconds: 1_800,
+    sessionCount: 2,
+  });
+  stats.daily.set(`${guildId}:1539918723396407364:2026-09-24T00:00:00.000Z`, {
+    guildId,
+    userId: "1539918723396407364",
+    day: new Date("2026-09-24T00:00:00.000Z"),
+    durationSeconds: 600,
+    sessionCount: 1,
+  });
+  await stats.open({
+    sessionId: "dashboard-active-session",
+    guildId,
+    userId: "1539918723396407363",
+    channelId: temporaryChannelId,
+    eventId: "dashboard-active-event",
+    at: new Date("2026-09-25T11:00:00.000Z"),
+  });
   const api = createDashboardControlApi({
     host: "127.0.0.1",
     port: 0,
@@ -59,9 +84,11 @@ async function fixture(ready = true) {
     bodyLimitBytes: 4096,
     configs,
     channels,
+    stats,
     discord,
     logger,
     isReady: () => ready,
+    now: () => now,
   });
   await api.start();
   return { api, configs, controls };
@@ -96,9 +123,34 @@ describe("dashboard control API", () => {
     if (!isRecord(snapshot.configuration) || !isRecord(snapshot.summary)) {
       throw new Error("invalid snapshot");
     }
+    if (!Array.isArray(snapshot.voiceActivity)) throw new Error("invalid voice activity");
     expect(snapshot.configuration.lobbyChannelName).toBe("Join to Create");
     expect(snapshot.channels).toHaveLength(1);
     expect(snapshot.summary.connectedMembers).toBe(1);
+    expect(snapshot.summary.voiceSeconds).toBe(6_000);
+    expect(snapshot.summary.voiceSessions).toBe(4);
+    expect(snapshot.voiceActivity).toHaveLength(7);
+    expect(snapshot.voiceActivity[5]).toEqual({ day: "2026-09-24", seconds: 2_400 });
+    expect(snapshot.voiceActivity[6]).toEqual({ day: "2026-09-25", seconds: 3_600 });
+  });
+
+  test("supports bounded 7 and 30 day statistics ranges", async () => {
+    const current = await fixture();
+    running.push(current.api);
+    const thirtyDays = await fetch(
+      `${current.api.url}/v1/dashboard/guilds/${guildId}/snapshot?days=30`,
+      { headers: { authorization } },
+    );
+    expect(thirtyDays.status).toBe(200);
+    const body = await thirtyDays.json();
+    if (!isRecord(body) || !isRecord(body.snapshot)) throw new Error("missing snapshot");
+    expect(body.snapshot.voiceActivity).toHaveLength(30);
+
+    const invalid = await fetch(
+      `${current.api.url}/v1/dashboard/guilds/${guildId}/snapshot?days=365`,
+      { headers: { authorization } },
+    );
+    expect(invalid.status).toBe(400);
   });
 
   test("updates persisted settings and routes channel renames through Discordeno port", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BitwisePermissionFlags, ChannelTypes } from "discordeno";
+import { BitwisePermissionFlags, ChannelTypes, type CreateApplicationCommand } from "discordeno";
 
 import {
   createMemoryCreationReservationRepository,
@@ -17,6 +17,7 @@ import {
 import { GLOBAL_VOICE_PANEL_PREFIX, IS_COMPONENTS_V2 } from "../src/lib/j2c/voice-panel.ts";
 import { createLogger } from "../src/lib/logger.ts";
 import type { InteractionCreatePayload } from "../src/lib/runtime-types.ts";
+import resetCommand from "../src/commands/reset.command.ts";
 
 function baseInteraction(
   overrides: Partial<InteractionCreatePayload> = {},
@@ -35,7 +36,10 @@ function baseInteraction(
   };
 }
 
-function createSetupDeps() {
+function createSetupDeps(stats?: {
+  stopGuildTracking(guildId: string, eventId: string): Promise<void>;
+  purgeGuild(guildId: string): Promise<unknown>;
+}) {
   const { discord, controls } = createFakeDiscord();
   const configs = createMemoryGuildConfigRepository();
   const channels = createMemoryTemporaryChannelRepository();
@@ -49,6 +53,7 @@ function createSetupDeps() {
     occupancy,
     discord,
     logger: createLogger({ service: "t", role: "t", level: "error", write: () => undefined }),
+    ...(stats ? { stats } : {}),
   });
   return { discord, controls, configs, channels, reservations, occupancy, setup };
 }
@@ -61,6 +66,19 @@ function lastEmbedDescription(
 }
 
 describe("/setup command", () => {
+  test("/reset exposes an optional stat boolean that defaults to preserving statistics", () => {
+    const commandData = resetCommand.data as CreateApplicationCommand & {
+      readonly options?: readonly {
+        readonly name: string;
+        readonly type: number;
+        readonly required?: boolean;
+      }[];
+    };
+    expect(commandData.options).toEqual([
+      expect.objectContaining({ name: "stat", type: 5, required: false }),
+    ]);
+  });
+
   test("rejects users without Manage Server", async () => {
     const { setup, discord } = createSetupDeps();
     const replies: string[] = [];
@@ -79,7 +97,10 @@ describe("/setup command", () => {
 
     await setup.execute(baseInteraction());
 
-    expect(controls.deferredInteractions).toEqual(["987654321098765432"]);
+    expect(controls.deferredInteractions).toHaveLength(0);
+    expect(controls.responses[0]?.embeds?.[0]?.description).toBe(
+      "<a:iconloading:1552886322589470781> <@223456789012345678>: Creating Join to Create...",
+    );
     expect(controls.guildChannelCreates).toHaveLength(3);
     expect(controls.guildChannelCreates[0]?.type).toBe(ChannelTypes.GuildCategory);
     expect(controls.guildChannelCreates[0]?.name).toBe(DEFAULT_SETUP_CATEGORY_NAME);
@@ -370,7 +391,7 @@ describe("/setup command", () => {
     await setup.execute(
       baseInteraction({
         commandName: "reset",
-        options: [],
+        options: [{ name: "stat", type: 5, value: false }],
       }),
     );
 
@@ -424,6 +445,50 @@ describe("/setup command", () => {
     expect(await configs.findByGuildId("123456789012345678")).toBeUndefined();
     expect(controls.channels.has(config!.categoryId)).toBe(false);
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/Factory Reset Complete/i);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(/statistics were preserved/i);
+  });
+
+  test("factory reset deletes guild statistics only when stat is true", async () => {
+    const purgedGuilds: string[] = [];
+    const { setup, controls } = createSetupDeps({
+      async stopGuildTracking() {},
+      async purgeGuild(guildId) { purgedGuilds.push(guildId); },
+    });
+    await setup.execute(baseInteraction());
+
+    await setup.execute(
+      baseInteraction({
+        commandName: "reset",
+        options: [{ name: "stat", type: 5, value: true }],
+      }),
+    );
+
+    expect(purgedGuilds).toEqual(["123456789012345678"]);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /voice statistics were permanently deleted/i,
+    );
+  });
+
+  test("factory reset reports a partial failure when statistics cannot be deleted", async () => {
+    const { setup, controls } = createSetupDeps({
+      async stopGuildTracking() {},
+      async purgeGuild() { throw new Error("database unavailable"); },
+    });
+    await setup.execute(baseInteraction());
+
+    await setup.execute(
+      baseInteraction({
+        commandName: "reset",
+        options: [{ name: "stat", type: 5, value: true }],
+      }),
+    );
+
+    expect(lastEmbedDescription(controls.editedInteractions)).toContain(
+      "<:error:1543407530380624037>",
+    );
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /was reset, but voice statistics could not be deleted/i,
+    );
   });
 
   test("reset rejects when Join to Create is not configured", async () => {
@@ -438,6 +503,26 @@ describe("/setup command", () => {
 
     expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
       /not configured in this server/i,
+    );
+  });
+
+  test("stat true can retry a statistics purge after Join to Create was already reset", async () => {
+    const purgedGuilds: string[] = [];
+    const { setup, controls } = createSetupDeps({
+      async stopGuildTracking() {},
+      async purgeGuild(guildId) { purgedGuilds.push(guildId); },
+    });
+
+    await setup.execute(
+      baseInteraction({
+        commandName: "reset",
+        options: [{ name: "stat", type: 5, value: true }],
+      }),
+    );
+
+    expect(purgedGuilds).toEqual(["123456789012345678"]);
+    expect(lastEmbedDescription(controls.editedInteractions)).toMatch(
+      /Voice Statistics Reset Complete/i,
     );
   });
 });

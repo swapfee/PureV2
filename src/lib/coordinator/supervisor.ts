@@ -1,6 +1,6 @@
 import type { CoordinatorConfig } from "../config.ts";
 import { buildWorkerSpawnEnv } from "../config.ts";
-import type { GatewayEventMessage, IpcMessage } from "../ipc/messages.ts";
+import type { GatewayEventMessage, IpcMessage, VoiceStateSnapshotMessage } from "../ipc/messages.ts";
 import { assertIpcMessage, parseIpcMessage } from "../ipc/messages.ts";
 import type { Logger } from "../logger.ts";
 import { assignWorker } from "../sharding.ts";
@@ -17,14 +17,27 @@ export interface WorkerSupervisor {
   waitUntilWorkersReady(timeoutMs?: number): Promise<void>;
   stop(reason?: string): Promise<void>;
   forwardGatewayEvent(message: GatewayEventMessage): void;
+  refreshVoiceSnapshots(): void;
   aliveWorkerCount(): number;
   expectedWorkerCount(): number;
   readyWorkerCount(): number;
   allWorkersMongoReady(): boolean;
+  allWorkersStatsReady(requiredWorkerCount?: number): boolean;
+  statsMetrics(): WorkerStatsMetrics;
   allHeartbeatsFresh(now?: number): boolean;
   eventSnapshot(): EventTrackerSnapshot;
   hasPoisonEvents(): boolean;
   lastWorkerEnv(workerId: number): Readonly<Record<string, string>> | undefined;
+}
+
+export interface WorkerStatsMetrics {
+  readonly sessionOpens: number;
+  readonly sessionCloses: number;
+  readonly deduplicatedEvents: number;
+  readonly reconciliationFindings: number;
+  readonly redisFailures: number;
+  readonly renders: number;
+  readonly renderFailures: number;
 }
 
 interface ManagedWorker {
@@ -33,6 +46,8 @@ interface ManagedWorker {
   alive: boolean;
   modulesReady: boolean;
   mongoReady: boolean;
+  statsReady: boolean;
+  statsMetrics: WorkerStatsMetrics;
   lastHeartbeatAt: number;
   backoff: ReturnType<typeof createRestartBackoff>;
   restartTimer?: ReturnType<typeof setTimeout>;
@@ -56,6 +71,8 @@ export interface WorkerSupervisorOptions {
     env: Record<string, string>,
     onMessage: (message: unknown) => void,
   ) => SupervisedProcess;
+  /** Returns a coordinator-owned, shard-filtered snapshot after Gateway warm-up. */
+  readonly voiceSnapshotForWorker?: (workerId: number) => VoiceStateSnapshotMessage | undefined;
 }
 
 function defaultSpawn(env: Record<string, string>, entryPath: string, onMessage: (message: unknown) => void): SupervisedProcess {
@@ -146,19 +163,44 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
         worker.alive = true;
         worker.mongoReady = message.mongoReady;
         worker.modulesReady = message.modulesReady;
+        worker.statsReady = message.statsReady;
+        worker.statsMetrics = message.statsMetrics;
         worker.lastHeartbeatAt = now();
         options.logger.info("Worker ready", {
           workerId,
           mongoReady: message.mongoReady,
           modulesReady: message.modulesReady,
+          statsReady: message.statsReady,
         });
+        {
+          const snapshot = options.voiceSnapshotForWorker?.(workerId);
+          if (snapshot) sendToWorker(worker, snapshot);
+        }
         for (const pending of tracker.pendingForWorker(workerId)) {
           sendToWorker(worker, pending);
+        }
+        break;
+      case "voiceStateSnapshotAck":
+        worker.statsReady = message.statsReady;
+        if (message.ok) {
+          options.logger.info("Worker restored coordinator voice-state snapshot", {
+            workerId,
+            snapshotId: message.snapshotId,
+            statsReady: message.statsReady,
+          });
+        } else {
+          options.logger.error("Worker failed to restore coordinator voice-state snapshot", {
+            workerId,
+            snapshotId: message.snapshotId,
+            error: message.error ?? "unknown_error",
+          });
         }
         break;
       case "heartbeat":
         worker.lastHeartbeatAt = now();
         worker.mongoReady = message.mongoReady;
+        worker.statsReady = message.statsReady;
+        worker.statsMetrics = message.statsMetrics;
         break;
       case "eventAck":
         tracker.acknowledge(message.eventId);
@@ -220,6 +262,8 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
       alive: true,
       modulesReady: false,
       mongoReady: false,
+      statsReady: false,
+      statsMetrics: { sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0, redisFailures: 0, renders: 0, renderFailures: 0 },
       lastHeartbeatAt: now(),
       backoff:
         existing?.backoff ??
@@ -235,6 +279,7 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
       managed.alive = false;
       managed.modulesReady = false;
       managed.mongoReady = false;
+      managed.statsReady = false;
       if (stopping) return;
       options.metrics.increment("workerRestarts");
       managed.backoff = managed.backoff.failure();
@@ -305,6 +350,31 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
       return true;
     },
 
+    allWorkersStatsReady(requiredWorkerCount = options.config.BOT_WORKER_COUNT): boolean {
+      if (workers.size < requiredWorkerCount) return false;
+      for (let workerId = 0; workerId < requiredWorkerCount; workerId += 1) {
+        if (!workers.get(workerId)?.statsReady) return false;
+      }
+      return true;
+    },
+
+    statsMetrics(): WorkerStatsMetrics {
+      const total: Record<keyof WorkerStatsMetrics, number> = {
+        sessionOpens: 0, sessionCloses: 0, deduplicatedEvents: 0, reconciliationFindings: 0,
+        redisFailures: 0, renders: 0, renderFailures: 0,
+      };
+      for (const worker of workers.values()) {
+        total.sessionOpens += worker.statsMetrics.sessionOpens;
+        total.sessionCloses += worker.statsMetrics.sessionCloses;
+        total.deduplicatedEvents += worker.statsMetrics.deduplicatedEvents;
+        total.reconciliationFindings += worker.statsMetrics.reconciliationFindings;
+        total.redisFailures += worker.statsMetrics.redisFailures;
+        total.renders += worker.statsMetrics.renders;
+        total.renderFailures += worker.statsMetrics.renderFailures;
+      }
+      return total;
+    },
+
     allHeartbeatsFresh(current = now()): boolean {
       if (workers.size < options.config.BOT_WORKER_COUNT) return false;
       for (const worker of workers.values()) {
@@ -347,6 +417,14 @@ export function createWorkerSupervisor(options: WorkerSupervisorOptions): Worker
     forwardGatewayEvent(message): void {
       const workerId = assignWorker(message.shardId, options.config.BOT_WORKER_COUNT);
       dispatchToWorker(workerId, message);
+    },
+
+    refreshVoiceSnapshots(): void {
+      for (const worker of workers.values()) {
+        if (!worker.alive || !worker.modulesReady || !worker.mongoReady) continue;
+        const snapshot = options.voiceSnapshotForWorker?.(worker.workerId);
+        if (snapshot) sendToWorker(worker, snapshot);
+      }
     },
 
     async stop(reason = "coordinator_shutdown"): Promise<void> {

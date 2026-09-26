@@ -41,10 +41,21 @@ export async function PUT(
   if (!session) return NextResponse.json({ error: "Authentication required" }, { status: 401 })
   const update = readUpdate(await request.json().catch(() => undefined))
   if (!update) return NextResponse.json({ error: "Invalid configuration" }, { status: 400 })
+  const daysValue = Number(request.nextUrl.searchParams.get("days") ?? "7")
+  if (daysValue !== 7 && daysValue !== 30) {
+    return NextResponse.json({ error: "Statistics range must be 7 or 30 days" }, { status: 400 })
+  }
   const { guildId } = await context.params
   try {
     const requestId = request.headers.get("x-request-id")?.slice(0, 100) || crypto.randomUUID()
-    const snapshot = await updateControlDashboardConfiguration(guildId, update, session.guilds, session.viewer, requestId)
+    const snapshot = await updateControlDashboardConfiguration(
+      guildId,
+      update,
+      session.guilds,
+      session.viewer,
+      requestId,
+      daysValue,
+    )
     return NextResponse.json({ snapshot })
   } catch (error) {
     return NextResponse.json(

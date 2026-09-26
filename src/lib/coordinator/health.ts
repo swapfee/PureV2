@@ -1,5 +1,6 @@
 import type { CoordinatorMetricsSnapshot } from "./metrics.ts";
 import type { J2cMetricsSnapshot } from "../j2c/metrics.ts";
+import type { VoiceStatsMetricsSnapshot } from "../stats/metrics.ts";
 
 export type ReadinessComponent =
   | "coordinatorMongo"
@@ -13,7 +14,8 @@ export type ReadinessComponent =
   | "queueOverflow"
   | "poisonEvents"
   | "shutdown"
-  | "j2c";
+  | "j2c"
+  | "stats";
 
 export interface ComponentStatus {
   readonly ok: boolean;
@@ -24,8 +26,9 @@ export interface ReadinessReport {
   readonly ok: boolean;
   readonly phase: "foundation" | "j2c";
   readonly j2cReady: boolean;
+  readonly statsReady: boolean;
   readonly components: Readonly<Record<ReadinessComponent, ComponentStatus>>;
-  readonly metrics: CoordinatorMetricsSnapshot & { readonly j2c?: J2cMetricsSnapshot };
+  readonly metrics: CoordinatorMetricsSnapshot & { readonly j2c?: J2cMetricsSnapshot; readonly stats?: VoiceStatsMetricsSnapshot };
 }
 
 export interface HealthStatusProvider {

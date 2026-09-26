@@ -45,7 +45,7 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     summary: {
       activeChannels: 4,
       connectedMembers: 17,
-      channelsCreatedToday: 28,
+      voiceSessions: 28,
       averageSessionMinutes: 47,
     },
   }
