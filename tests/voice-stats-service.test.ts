@@ -120,6 +120,25 @@ describe("managed voice statistics", () => {
     expect(snapshot.daily).toHaveLength(7);
   });
 
+  test("splits card activity across the viewer's local midnight", async () => {
+    const fx = fixture(new Date("2026-09-24T06:30:00Z"));
+    await fx.cache.connect();
+    await addManagedChannel(fx, channelA);
+    await fx.service.handle({ guildId, userId, channelId: channelA }, "local-midnight-join");
+    fx.setNow(new Date("2026-09-24T07:30:00Z"));
+
+    const snapshot = await fx.service.getSnapshot(
+      guildId,
+      userId,
+      "Member",
+      "America/Los_Angeles",
+    );
+
+    expect(snapshot.timeZone).toBe("America/Los_Angeles");
+    expect(snapshot.daily.at(-2)?.seconds).toBe(1_800);
+    expect(snapshot.daily.at(-1)?.seconds).toBe(1_800);
+  });
+
   test("purges durable and cached statistics for only the selected guild", async () => {
     const fx = fixture(new Date("2026-09-24T10:00:00Z"));
     const otherGuildId = "678901234567890123";

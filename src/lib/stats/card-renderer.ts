@@ -157,7 +157,7 @@ export function createVoiceStatsCardRenderer(): VoiceStatsCardRenderer {
       context.fillText(fitText(context, `@${snapshot.username}`, 690), 170, 121);
       context.font = font(16);
       const since = snapshot.trackedSince
-        ? `Tracked since ${snapshot.trackedSince.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}`
+        ? `Tracked since ${snapshot.trackedSince.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: snapshot.timeZone })}`
         : "No tracked activity yet";
       context.fillText(since, 170, 151);
 

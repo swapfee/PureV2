@@ -31,6 +31,17 @@ export interface VoiceStatsRepository {
   failEvent(eventId: string, reason: string): Promise<void>;
   findActive(guildId: string, userId: string): Promise<VoiceStatsSessionRecord | undefined>;
   listActiveByGuild(guildId: string): Promise<readonly VoiceStatsSessionRecord[]>;
+  listGuildSessionsOverlapping(
+    guildId: string,
+    from: Date,
+    to: Date,
+  ): Promise<readonly VoiceStatsSessionRecord[]>;
+  listMemberSessionsOverlapping(
+    guildId: string,
+    userId: string,
+    from: Date,
+    to: Date,
+  ): Promise<readonly VoiceStatsSessionRecord[]>;
   open(input: OpenVoiceStatsSessionInput): Promise<VoiceStatsSessionRecord>;
   close(guildId: string, userId: string, eventId: string, at: Date): Promise<VoiceStatsSessionRecord | undefined>;
   checkpoint(guildId: string, userId: string, at: Date): Promise<void>;

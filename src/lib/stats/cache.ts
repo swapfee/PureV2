@@ -24,8 +24,8 @@ function activeKey(guildId: string, userId: string): string {
   return `purev2:stats:active:${guildId}:${userId}`;
 }
 
-export function statsQueryCacheKey(guildId: string, userId: string): string {
-  return `purev2:stats:query:${guildId}:${userId}`;
+export function statsQueryCacheKey(guildId: string, userId: string, timeZone = "UTC"): string {
+  return `purev2:stats:query:${guildId}:${userId}:${encodeURIComponent(timeZone)}`;
 }
 
 function eventKey(eventId: string): string { return `purev2:stats:event:${eventId}`; }

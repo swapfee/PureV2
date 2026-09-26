@@ -23,7 +23,7 @@ test("voice stats renderer palette contains only neutral grayscale accents", () 
 test("voice stats renderer creates a 1600x900 PNG", async () => {
   const png = await createVoiceStatsCardRenderer().render({
     guildId: "123456789012345678", userId: "234567890123456789", displayName: "Example Member",
-    username: "example.user", serverName: "Example Server",
+    username: "example.user", serverName: "Example Server", timeZone: "America/Los_Angeles",
     trackedSince: new Date("2026-09-01T00:00:00Z"), totalSeconds: 7_200, sessionCount: 4,
     activeDays: 3, currentSessionSeconds: 120,
     daily: Array.from({ length: 7 }, (_, index) => ({ day: new Date(Date.UTC(2026, 8, 17 + index)), seconds: index * 300 })),
@@ -38,7 +38,7 @@ test("voice stats renderer creates a 1600x900 PNG", async () => {
 test("voice stats renderer creates a valid zero-state card", async () => {
   const png = await createVoiceStatsCardRenderer().render({
     guildId: "123456789012345678", userId: "234567890123456789", displayName: "New Member",
-    username: "new.member", serverName: "Example Server",
+    username: "new.member", serverName: "Example Server", timeZone: "UTC",
     totalSeconds: 0, sessionCount: 0, activeDays: 0, currentSessionSeconds: 0,
     daily: Array.from({ length: 7 }, (_, index) => ({ day: new Date(Date.UTC(2026, 8, 17 + index)), seconds: 0 })),
     leaderboard: [],
@@ -53,7 +53,8 @@ test("voice stats renderer draws the selected member avatar in the left profile"
   avatarContext.fillRect(0, 0, 16, 16);
   const png = await createVoiceStatsCardRenderer().render({
     guildId: "123456789012345678", userId: "234567890123456789",
-    displayName: "Avatar Member", username: "avatar.user", serverName: "Example Server", avatarData: avatar.toBuffer("image/png"),
+    displayName: "Avatar Member", username: "avatar.user", serverName: "Example Server",
+    timeZone: "UTC", avatarData: avatar.toBuffer("image/png"),
     totalSeconds: 300, sessionCount: 1, activeDays: 1, currentSessionSeconds: 0,
     daily: Array.from({ length: 7 }, (_, index) => ({ day: new Date(Date.UTC(2026, 8, 17 + index)), seconds: 0 })),
     leaderboard: [],

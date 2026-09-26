@@ -28,6 +28,7 @@ voiceStatsSessionSchema.index(
   { unique: true, name: "voice_stats_sessions_one_active_user", partialFilterExpression: { status: "active" } },
 );
 voiceStatsSessionSchema.index({ guildId: 1, userId: 1, startedAt: -1 }, { name: "voice_stats_sessions_member_startedAt" });
+voiceStatsSessionSchema.index({ guildId: 1, startedAt: -1 }, { name: "voice_stats_sessions_guild_startedAt" });
 voiceStatsSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "voice_stats_sessions_expiresAt_ttl" });
 
 export type VoiceStatsSessionDocument = InferSchemaType<typeof voiceStatsSessionSchema> & { createdAt: Date; updatedAt: Date };

@@ -55,20 +55,48 @@ async function fixture(ready = true) {
   ] as const) {
     controls.channels.set(id, { id, name, guildId, permissionOverwrites: [] });
   }
-  stats.daily.set(`${guildId}:1539918723396407362:2026-09-24T00:00:00.000Z`, {
+  await stats.open({
+    sessionId: "dashboard-completed-session-1",
     guildId,
     userId: "1539918723396407362",
-    day: new Date("2026-09-24T00:00:00.000Z"),
-    durationSeconds: 1_800,
-    sessionCount: 2,
+    channelId: temporaryChannelId,
+    eventId: "dashboard-completed-open-1",
+    at: new Date("2026-09-24T00:00:00.000Z"),
   });
-  stats.daily.set(`${guildId}:1539918723396407364:2026-09-24T00:00:00.000Z`, {
+  await stats.close(
+    guildId,
+    "1539918723396407362",
+    "dashboard-completed-close-1",
+    new Date("2026-09-24T00:10:00.000Z"),
+  );
+  await stats.open({
+    sessionId: "dashboard-completed-session-2",
+    guildId,
+    userId: "1539918723396407362",
+    channelId: temporaryChannelId,
+    eventId: "dashboard-completed-open-2",
+    at: new Date("2026-09-24T00:20:00.000Z"),
+  });
+  await stats.close(
+    guildId,
+    "1539918723396407362",
+    "dashboard-completed-close-2",
+    new Date("2026-09-24T00:40:00.000Z"),
+  );
+  await stats.open({
+    sessionId: "dashboard-completed-session-3",
     guildId,
     userId: "1539918723396407364",
-    day: new Date("2026-09-24T00:00:00.000Z"),
-    durationSeconds: 600,
-    sessionCount: 1,
+    channelId: temporaryChannelId,
+    eventId: "dashboard-completed-open-3",
+    at: new Date("2026-09-24T00:45:00.000Z"),
   });
+  await stats.close(
+    guildId,
+    "1539918723396407364",
+    "dashboard-completed-close-3",
+    new Date("2026-09-24T00:55:00.000Z"),
+  );
   await stats.open({
     sessionId: "dashboard-active-session",
     guildId,
@@ -148,6 +176,29 @@ describe("dashboard control API", () => {
 
     const invalid = await fetch(
       `${current.api.url}/v1/dashboard/guilds/${guildId}/snapshot?days=365`,
+      { headers: { authorization } },
+    );
+    expect(invalid.status).toBe(400);
+  });
+
+  test("aligns day buckets to a validated viewer timezone", async () => {
+    const current = await fixture();
+    running.push(current.api);
+    const response = await fetch(
+      `${current.api.url}/v1/dashboard/guilds/${guildId}/snapshot?timezone=America%2FLos_Angeles`,
+      { headers: { authorization } },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    if (!isRecord(body) || !isRecord(body.snapshot)) throw new Error("missing snapshot");
+    expect(body.snapshot.timeZone).toBe("America/Los_Angeles");
+    const voiceActivity = body.snapshot.voiceActivity;
+    if (!Array.isArray(voiceActivity)) throw new Error("missing voice activity");
+    expect(voiceActivity[4]).toEqual({ day: "2026-09-23", seconds: 2_400 });
+    expect(voiceActivity[6]).toEqual({ day: "2026-09-25", seconds: 3_600 });
+
+    const invalid = await fetch(
+      `${current.api.url}/v1/dashboard/guilds/${guildId}/snapshot?timezone=VPS%2FLocal`,
       { headers: { authorization } },
     );
     expect(invalid.status).toBe(400);

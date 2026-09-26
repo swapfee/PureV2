@@ -34,6 +34,10 @@ describe("voice statistics models", () => {
     const active = sessionIndexes.find(([, options]) => options.name === "voice_stats_sessions_one_active_user");
     expect(active?.[0]).toEqual({ guildId: 1, userId: 1, status: 1 });
     expect(active?.[1]).toMatchObject({ unique: true, partialFilterExpression: { status: "active" } });
+    expect(sessionIndexes.some(([keys, options]) =>
+      options.name === "voice_stats_sessions_guild_startedAt" &&
+      JSON.stringify(keys) === JSON.stringify({ guildId: 1, startedAt: -1 }),
+    )).toBe(true);
     expect(VoiceMemberStatsModel.schema.indexes().some(([, options]) => options.name === "voice_member_stats_guild_user_unique" && options.unique === true)).toBe(true);
     expect(VoiceDailyStatsModel.schema.indexes().some(([, options]) => options.name === "voice_daily_stats_guild_user_day_unique" && options.unique === true)).toBe(true);
     expect(VoiceStatsEventModel.schema.indexes().some(([, options]) => options.name === "voice_stats_events_eventId_unique" && options.unique === true)).toBe(true);

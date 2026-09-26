@@ -6,7 +6,15 @@ const statCommand: CommandModule = {
   data: {
     name: "stat",
     description: "View managed voice-channel statistics",
-    options: [{ type: ApplicationCommandOptionTypes.User, name: "member", description: "Guild member to view", required: false }],
+    options: [
+      { type: ApplicationCommandOptionTypes.User, name: "member", description: "Guild member to view", required: false },
+      {
+        type: ApplicationCommandOptionTypes.String,
+        name: "timezone",
+        description: "IANA timezone (defaults to UTC), for example America/Los_Angeles",
+        required: false,
+      },
+    ],
   },
   async execute(context, interaction) {
     if (!context.stats) throw new Error("Stats command service is unavailable");

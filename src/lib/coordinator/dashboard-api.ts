@@ -6,11 +6,8 @@ import type {
   GuildConfigRepository,
   TemporaryChannelRepository,
 } from "../j2c/repositories.ts";
-import {
-  splitDurationByUtcDay,
-  utcDayStart,
-  type VoiceStatsRepository,
-} from "../stats/repositories.ts";
+import type { VoiceStatsRepository } from "../stats/repositories.ts";
+import { normalizeTimeZone, overlapSeconds, zonedDayWindows } from "../time-zone.ts";
 import { timingSafeEqualString } from "../security.ts";
 
 const snowflakeSchema = z.string().regex(/^\d{17,20}$/);
@@ -35,7 +32,7 @@ export interface DashboardControlApiOptions {
   readonly bodyLimitBytes: number;
   readonly configs: GuildConfigRepository;
   readonly channels: TemporaryChannelRepository;
-  readonly stats: Pick<VoiceStatsRepository, "getGuildDaily" | "listActiveByGuild">;
+  readonly stats: Pick<VoiceStatsRepository, "listGuildSessionsOverlapping">;
   readonly discord: DiscordApiPort;
   readonly logger: Logger;
   readonly isReady: () => boolean;
@@ -51,6 +48,7 @@ export interface DashboardControlApi {
 
 interface DashboardSnapshotDto {
   readonly guildId: string;
+  readonly timeZone: string;
   readonly configuration: {
     readonly enabled: boolean;
     readonly lobbyChannelId: string;
@@ -143,41 +141,42 @@ async function buildVoiceActivity(
   guildId: string,
   days: DashboardRangeDays,
   now: Date,
+  timeZone: string,
   stats: DashboardControlApiOptions["stats"],
 ): Promise<{
   readonly points: readonly { readonly day: string; readonly seconds: number }[];
   readonly totalSeconds: number;
   readonly sessionCount: number;
 }> {
-  const today = utcDayStart(now);
-  const from = new Date(today.getTime() - (days - 1) * 86_400_000);
-  const [dailyRows, activeSessions] = await Promise.all([
-    stats.getGuildDaily(guildId, from, today),
-    stats.listActiveByGuild(guildId),
-  ]);
-  const secondsByDay = new Map(
-    dailyRows.map((row) => [row.day.toISOString(), row.durationSeconds]),
-  );
+  const windows = zonedDayWindows(now, days, timeZone);
+  const firstWindow = windows[0];
+  if (!firstWindow) return { points: [], totalSeconds: 0, sessionCount: 0 };
+  const sessions = await stats.listGuildSessionsOverlapping(guildId, firstWindow.start, now);
+  const secondsByDay = new Map(windows.map((window) => [window.key, 0]));
+  let sessionCount = 0;
 
-  for (const session of activeSessions) {
-    const startedAt = session.startedAt < from ? from : session.startedAt;
-    for (const part of splitDurationByUtcDay(startedAt, now)) {
-      const key = part.day.toISOString();
-      secondsByDay.set(key, (secondsByDay.get(key) ?? 0) + part.seconds);
+  for (const session of sessions) {
+    const sessionEnd = session.status === "active"
+      ? now
+      : session.endedAt ?? session.lastConfirmedAt;
+    let counted = false;
+    for (const window of windows) {
+      const seconds = overlapSeconds(session.startedAt, sessionEnd, window);
+      if (seconds === 0) continue;
+      counted = true;
+      secondsByDay.set(window.key, (secondsByDay.get(window.key) ?? 0) + seconds);
     }
+    if (counted) sessionCount += 1;
   }
 
-  const points = Array.from({ length: days }, (_, index) => {
-    const day = new Date(from.getTime() + index * 86_400_000);
-    return {
-      day: day.toISOString().slice(0, 10),
-      seconds: secondsByDay.get(day.toISOString()) ?? 0,
-    };
-  });
+  const points = windows.map((window) => ({
+    day: window.key,
+    seconds: secondsByDay.get(window.key) ?? 0,
+  }));
   return {
     points,
     totalSeconds: points.reduce((total, point) => total + point.seconds, 0),
-    sessionCount: dailyRows.reduce((total, row) => total + row.sessionCount, 0),
+    sessionCount,
   };
 }
 
@@ -185,6 +184,7 @@ async function buildSnapshot(
   guildId: string,
   options: DashboardControlApiOptions,
   days: DashboardRangeDays = 7,
+  timeZone = "UTC",
 ): Promise<DashboardSnapshotDto | undefined> {
   const config = await options.configs.findByGuildId(guildId);
   if (!config) return undefined;
@@ -204,7 +204,7 @@ async function buildSnapshot(
         `Channel ${record.channelId.slice(-4)}`,
       ),
     ),
-    buildVoiceActivity(guildId, days, now, options.stats),
+    buildVoiceActivity(guildId, days, now, timeZone, options.stats),
   ]);
 
   const activeChannels = activeRecords.map((record, index) => ({
@@ -220,6 +220,7 @@ async function buildSnapshot(
 
   return {
     guildId,
+    timeZone,
     configuration: {
       enabled: config.enabled,
       lobbyChannelId: config.lobbyChannelId,
@@ -249,6 +250,7 @@ async function updateConfiguration(
   options: DashboardControlApiOptions,
   requestId: string,
   days: DashboardRangeDays,
+  timeZone: string,
 ): Promise<DashboardSnapshotDto | undefined> {
   const current = await options.configs.findByGuildId(guildId);
   if (!current) return undefined;
@@ -293,7 +295,7 @@ async function updateConfiguration(
     moderatorRoleIds: current.moderatorRoleIds,
   });
 
-  return buildSnapshot(guildId, options, days);
+  return buildSnapshot(guildId, options, days, timeZone);
 }
 
 export function createDashboardControlApi(options: DashboardControlApiOptions): DashboardControlApi {
@@ -334,10 +336,15 @@ export function createDashboardControlApi(options: DashboardControlApiOptions): 
           if (requestedDays !== 7 && requestedDays !== 30) {
             return errorResponse("invalid_range", "Statistics range must be 7 or 30 days", 400);
           }
+          const requestedTimeZone = url.searchParams.get("timezone") ?? "UTC";
+          const timeZone = normalizeTimeZone(requestedTimeZone);
+          if (!timeZone) {
+            return errorResponse("invalid_timezone", "Timezone must be a valid IANA timezone", 400);
+          }
 
           try {
             if (request.method === "GET") {
-              const snapshot = await buildSnapshot(guildId, options, requestedDays);
+              const snapshot = await buildSnapshot(guildId, options, requestedDays, timeZone);
               if (!snapshot) return errorResponse("not_configured", "Join to Create is not configured", 404);
               if (resource === "snapshot") return Response.json({ ok: true, snapshot });
               return Response.json({ ok: true, configuration: snapshot.configuration });
@@ -355,6 +362,7 @@ export function createDashboardControlApi(options: DashboardControlApiOptions): 
                 options,
                 requestId,
                 requestedDays,
+                timeZone,
               );
               if (!snapshot) return errorResponse("not_configured", "Join to Create is not configured", 404);
               options.logger.info("Dashboard configuration updated", { guildId });

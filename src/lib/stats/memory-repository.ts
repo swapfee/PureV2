@@ -40,6 +40,18 @@ export function createMemoryVoiceStatsRepository(): VoiceStatsRepository & {
     },
     async findActive(guildId, userId) { return findActive(guildId, userId); },
     async listActiveByGuild(guildId) { return [...sessions.values()].filter((entry) => entry.guildId === guildId && entry.status === "active"); },
+    async listGuildSessionsOverlapping(guildId, from, to) {
+      return [...sessions.values()].filter((entry) =>
+        entry.guildId === guildId && entry.startedAt < to &&
+        (entry.status === "active" || (entry.endedAt !== undefined && entry.endedAt > from)),
+      ).toSorted((left, right) => left.startedAt.getTime() - right.startedAt.getTime());
+    },
+    async listMemberSessionsOverlapping(guildId, userId, from, to) {
+      return [...sessions.values()].filter((entry) =>
+        entry.guildId === guildId && entry.userId === userId && entry.startedAt < to &&
+        (entry.status === "active" || (entry.endedAt !== undefined && entry.endedAt > from)),
+      ).toSorted((left, right) => left.startedAt.getTime() - right.startedAt.getTime());
+    },
     async open(input) {
       const existing = findActive(input.guildId, input.userId);
       if (existing) throw new Error("active_voice_stats_session_exists");
