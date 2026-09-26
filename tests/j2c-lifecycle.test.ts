@@ -16,6 +16,7 @@ import { createJ2cRuntime, RESTART_EMPTY_CHANNEL_RESWEEP_MS } from "../src/lib/j
 import { createManualTimerScheduler } from "../src/lib/j2c/time.ts";
 import { createVoiceOccupancyTracker } from "../src/lib/j2c/voice-occupancy.ts";
 import { createLogger } from "../src/lib/logger.ts";
+import type { DiscordApiPort } from "../src/lib/runtime-types.ts";
 
 function readyOccupancy(seedGuildId = guildId) {
   const occupancy = createVoiceOccupancyTracker();
@@ -98,6 +99,81 @@ describe("creation lifecycle", () => {
     expect(metrics.snapshot().activeTemporaryChannels).toBe(1);
   });
 
+  test("moves the member before channel positioning and control-panel delivery", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "{username}'s channel",
+      channelHoist: "bottom",
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.channels.set(lobbyId, {
+      id: lobbyId,
+      name: "Join to Create",
+      position: 7,
+      guildId,
+      permissionOverwrites: [],
+    });
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+    controls.currentUser = { id: "111111111111111111", username: "Pure" };
+
+    const operations: string[] = [];
+    const trackedDiscord: DiscordApiPort = {
+      ...discord,
+      async moveMemberToChannel(request) {
+        operations.push("move");
+        return discord.moveMemberToChannel(request);
+      },
+      async getChannel(request) {
+        if (request.channelId === lobbyId) operations.push("lobby-position-read");
+        return discord.getChannel(request);
+      },
+      async setGuildChannelPosition(request) {
+        operations.push("position");
+        return discord.setGuildChannelPosition(request);
+      },
+      async getCurrentUser() {
+        operations.push("bot-user");
+        return discord.getCurrentUser();
+      },
+      async sendChannelMessage(request) {
+        operations.push("panel");
+        return discord.sendChannelMessage(request);
+      },
+    };
+
+    const creation = buildCreation({
+      configs,
+      channels,
+      reservations,
+      discord: trackedDiscord,
+      metrics,
+    });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-fast-move",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+      username: "Ada",
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(operations.indexOf("move")).toBeGreaterThanOrEqual(0);
+    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("lobby-position-read"));
+    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("position"));
+    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("bot-user"));
+    expect(operations.indexOf("move")).toBeLessThan(operations.indexOf("panel"));
+    const [record] = await channels.listByGuild(guildId);
+    expect(record?.status).toBe("active");
+    expect(record?.panelMessageId).toBeDefined();
+  });
+
   test("uses sequential names and grants owner edit access when configured", async () => {
     const configs = createMemoryGuildConfigRepository();
     await configs.upsert({
@@ -133,6 +209,54 @@ describe("creation lifecycle", () => {
     expect(controls.overwriteCalls.some((call) => call.overwriteId === memberId)).toBe(true);
     const stored = [...(await channels.listByGuild(guildId))];
     expect(stored[0]?.sequenceNumber).toBe(1);
+  });
+
+  test("sequence naming skips member identity REST reads", async () => {
+    const configs = createMemoryGuildConfigRepository();
+    await configs.upsert({
+      guildId,
+      enabled: true,
+      lobbyChannelId: lobbyId,
+      categoryId,
+      channelNameTemplate: "Gaming",
+      namingMode: "sequence",
+      sequenceNext: 1,
+    });
+    const channels = createMemoryTemporaryChannelRepository();
+    const reservations = createMemoryCreationReservationRepository();
+    const metrics = createJ2cMetrics();
+    const { discord, controls } = createFakeDiscord();
+    controls.voiceByUser.set(`${guildId}:${memberId}`, lobbyId);
+    let identityReads = 0;
+    const trackedDiscord: DiscordApiPort = {
+      ...discord,
+      async getGuildMember(request) {
+        identityReads += 1;
+        return discord.getGuildMember(request);
+      },
+      async getUser(request) {
+        identityReads += 1;
+        return discord.getUser(request);
+      },
+    };
+
+    const creation = buildCreation({
+      configs,
+      channels,
+      reservations,
+      discord: trackedDiscord,
+      metrics,
+    });
+    const outcome = await creation.handleVoiceJoin({
+      eventId: "event-seq-no-identity",
+      guildId,
+      memberId,
+      joinedChannelId: lobbyId,
+    });
+
+    expect(outcome.kind).toBe("created");
+    expect(controls.createCalls[0]?.name).toBe("Gaming 1");
+    expect(identityReads).toBe(0);
   });
 
   test("bottom hoist creates the newest room immediately below the lobby", async () => {

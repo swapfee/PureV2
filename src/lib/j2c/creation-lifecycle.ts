@@ -81,6 +81,7 @@ export function createCreationLifecycle(options: {
   readonly clock?: Clock;
 }): CreationLifecycle {
   const clock = options.clock ?? systemClock();
+  let cachedBotUser: { readonly id: string; readonly username: string } | undefined;
 
   const refreshActiveGauge = async (): Promise<void> => {
     const count = await options.channels.countByStatus("active");
@@ -118,6 +119,13 @@ export function createCreationLifecycle(options: {
     }
 
     return "user";
+  };
+
+  const resolveBotUser = async () => {
+    if (cachedBotUser) return { kind: "found" as const, value: cachedBotUser };
+    const result = await options.discord.getCurrentUser();
+    if (result.kind === "found") cachedBotUser = result.value;
+    return result;
   };
 
   const compensate = async (input: {
@@ -166,6 +174,7 @@ export function createCreationLifecycle(options: {
 
   return {
     async handleVoiceJoin(input) {
+      const startedAt = performance.now();
       const config = await options.configs.findByGuildId(input.guildId);
       if (!config || !config.enabled) {
         return { kind: "ignored", reason: "feature_disabled" };
@@ -215,31 +224,14 @@ export function createCreationLifecycle(options: {
         return { kind: "cancelled", reason: "left_lobby_before_create" };
       }
 
-      const channelUsername = await resolveChannelUsername({
-        guildId: input.guildId,
-        memberId: input.memberId,
-        ...(input.username === undefined ? {} : { username: input.username }),
-      });
-
-      let channelPosition: number | undefined;
-      if (config.channelHoist === "bottom") {
-        const lobby = await options.discord.getChannel({ channelId: config.lobbyChannelId });
-        if (
-          lobby.kind === "found" &&
-          typeof lobby.value.position === "number" &&
-          Number.isInteger(lobby.value.position) &&
-          lobby.value.position >= 0
-        ) {
-          channelPosition = lobby.value.position + 1;
-        } else {
-          // Appending is the safe fallback: the room remains below the lobby.
-          options.logger.warn("Unable to resolve lobby position for bottom channel hoist", {
-            guildId: input.guildId,
-            channelId: config.lobbyChannelId,
-            outcome: lobby.kind,
-          });
-        }
-      }
+      const channelUsername =
+        config.namingMode === "sequence"
+          ? ""
+          : await resolveChannelUsername({
+              guildId: input.guildId,
+              memberId: input.memberId,
+              ...(input.username === undefined ? {} : { username: input.username }),
+            });
 
       let channelId: string | undefined;
       let sequenceNumber: number | undefined;
@@ -361,40 +353,6 @@ export function createCreationLifecycle(options: {
         return { kind: "failed", reason: "sequence_conflict_exhausted" };
       }
 
-      if (channelPosition !== undefined) {
-        const positioned = await options.discord.setGuildChannelPosition({
-          guildId: input.guildId,
-          channelId,
-          position: channelPosition,
-          requestId: channelPositionRequestId(input.eventId),
-          reason: "join-to-create channel hoist",
-        });
-        if (positioned.kind !== "ok") {
-          options.logger.error("Temporary channel position update failed", {
-            guildId: input.guildId,
-            channelId,
-            lobbyChannelId: config.lobbyChannelId,
-            requestedPosition: channelPosition,
-            result: positioned.kind,
-          });
-          await postGuildErrorLog({
-            discord: options.discord,
-            configs: options.configs,
-            logger: options.logger,
-            guildId: input.guildId,
-            requestId: `${channelPositionRequestId(input.eventId)}:error-log`,
-            entry: {
-              area: positioned.kind === "forbidden" ? "permissions" : "join_to_create",
-              summary: "Created a temporary voice channel but could not place it below the lobby.",
-              detail: `Discord outcome: \`${positioned.kind}\`.`,
-              solution: solutionForDiscordOutcome(positioned.kind),
-              userId: input.memberId,
-              channelId,
-            },
-          });
-        }
-      }
-
       if (config.permissionSource === "lobby") {
         await copyChannelPermissionOverwrites({
           discord: options.discord,
@@ -415,8 +373,6 @@ export function createCreationLifecycle(options: {
         ? await options.blocks.getBlockedUserIds(input.guildId, input.memberId)
         : [];
 
-      // Install the panel while status is still "creating" so voice-state repair
-      // (active-only) cannot race and send a second copy after markActive.
       if (blockedUserIds.length > 0) {
         await options.channels.setAppliedBlockUserIds(channelId, blockedUserIds);
         const record = await options.channels.findByChannelId(channelId);
@@ -454,27 +410,6 @@ export function createCreationLifecycle(options: {
           }
         }
       }
-      const botUser = await options.discord.getCurrentUser();
-      if (botUser.kind === "found") {
-        await installVoiceControlPanel({
-          discord: options.discord,
-          channels: options.channels,
-          logger: options.logger,
-          guildId: input.guildId,
-          channelId,
-          ownerId: input.memberId,
-          botUserId: botUser.value.id,
-          botUsername: botUser.value.username,
-          requestId: createReqId,
-          configs: options.configs,
-        });
-      } else {
-        options.logger.warn("Voice panel skipped; bot user unavailable", {
-          guildId: input.guildId,
-          channelId,
-          outcome: botUser.kind,
-        });
-      }
 
       const moved = await options.discord.moveMemberToChannel({
         guildId: input.guildId,
@@ -510,10 +445,105 @@ export function createCreationLifecycle(options: {
         };
       }
 
+      const moveLatencyMs = Math.round(performance.now() - startedAt);
       await options.channels.markActive(channelId, [input.memberId]);
       await options.reservationService.complete(reservationId, channelId);
       options.metrics.increment("creationSuccesses");
-      await refreshActiveGauge();
+
+      // The member is already in their room. Finish non-critical presentation work
+      // concurrently so positioning and panel delivery never delay the move.
+      const positionChannel = async (): Promise<void> => {
+        if (config.channelHoist !== "bottom") return;
+        try {
+          const lobby = await options.discord.getChannel({ channelId: config.lobbyChannelId });
+          if (
+            lobby.kind !== "found" ||
+            typeof lobby.value.position !== "number" ||
+            !Number.isInteger(lobby.value.position) ||
+            lobby.value.position < 0
+          ) {
+            // Appending is the safe fallback: the room remains below the lobby.
+            options.logger.warn("Unable to resolve lobby position for bottom channel hoist", {
+              guildId: input.guildId,
+              channelId: config.lobbyChannelId,
+              outcome: lobby.kind,
+            });
+            return;
+          }
+          const channelPosition = lobby.value.position + 1;
+          const positioned = await options.discord.setGuildChannelPosition({
+            guildId: input.guildId,
+            channelId,
+            position: channelPosition,
+            requestId: channelPositionRequestId(input.eventId),
+            reason: "join-to-create channel hoist",
+          });
+          if (positioned.kind === "ok") return;
+
+          options.logger.error("Temporary channel position update failed", {
+            guildId: input.guildId,
+            channelId,
+            lobbyChannelId: config.lobbyChannelId,
+            requestedPosition: channelPosition,
+            result: positioned.kind,
+          });
+          await postGuildErrorLog({
+            discord: options.discord,
+            configs: options.configs,
+            logger: options.logger,
+            guildId: input.guildId,
+            requestId: `${channelPositionRequestId(input.eventId)}:error-log`,
+            entry: {
+              area: positioned.kind === "forbidden" ? "permissions" : "join_to_create",
+              summary: "Created a temporary voice channel but could not place it below the lobby.",
+              detail: `Discord outcome: \`${positioned.kind}\`.`,
+              solution: solutionForDiscordOutcome(positioned.kind),
+              userId: input.memberId,
+              channelId,
+            },
+          });
+        } catch (error) {
+          options.logger.error("Temporary channel position task failed", {
+            guildId: input.guildId,
+            channelId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+
+      const installPanel = async (): Promise<void> => {
+        try {
+          const botUser = await resolveBotUser();
+          if (botUser.kind === "found") {
+            await installVoiceControlPanel({
+              discord: options.discord,
+              channels: options.channels,
+              logger: options.logger,
+              guildId: input.guildId,
+              channelId,
+              ownerId: input.memberId,
+              botUserId: botUser.value.id,
+              botUsername: botUser.value.username,
+              requestId: createReqId,
+              configs: options.configs,
+            });
+            return;
+          }
+          options.logger.warn("Voice panel skipped; bot user unavailable", {
+            guildId: input.guildId,
+            channelId,
+            outcome: botUser.kind,
+          });
+        } catch (error) {
+          options.logger.warn("Voice panel task failed; channel remains usable via /vc", {
+            guildId: input.guildId,
+            channelId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      };
+
+      await Promise.all([positionChannel(), installPanel(), refreshActiveGauge()]);
 
       options.logger.info("Temporary channel created", {
         guildId: input.guildId,
@@ -522,6 +552,8 @@ export function createCreationLifecycle(options: {
         reservationId,
         eventId: input.eventId,
         requestId: createReqId,
+        moveLatencyMs,
+        lifecycleLatencyMs: Math.round(performance.now() - startedAt),
         at: clock.now().toISOString(),
       });
       return { kind: "created", channelId };
