@@ -12,6 +12,16 @@ const ALLOWED_FIELDS = new Set([
   "ownerCanEdit",
 ])
 
+function validTimeZone(value: string): boolean {
+  if (value.length > 100) return false
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format()
+    return true
+  } catch {
+    return false
+  }
+}
+
 function readUpdate(value: unknown): DashboardConfigurationUpdate | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined
   const entries = Object.entries(value)
@@ -45,6 +55,10 @@ export async function PUT(
   if (daysValue !== 7 && daysValue !== 30) {
     return NextResponse.json({ error: "Statistics range must be 7 or 30 days" }, { status: 400 })
   }
+  const timeZone = request.nextUrl.searchParams.get("timezone") ?? "UTC"
+  if (!validTimeZone(timeZone)) {
+    return NextResponse.json({ error: "Timezone must be a valid IANA timezone" }, { status: 400 })
+  }
   const { guildId } = await context.params
   try {
     const requestId = request.headers.get("x-request-id")?.slice(0, 100) || crypto.randomUUID()
@@ -55,6 +69,7 @@ export async function PUT(
       session.viewer,
       requestId,
       daysValue,
+      timeZone,
     )
     return NextResponse.json({ snapshot })
   } catch (error) {

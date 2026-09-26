@@ -53,6 +53,7 @@ export interface JoinToCreateConfiguration {
 }
 
 export interface DashboardSnapshot {
+  readonly timeZone: string
   readonly viewer: {
     readonly displayName: string
     readonly username: string
@@ -73,6 +74,7 @@ export interface DashboardSnapshot {
 }
 
 export const dashboardSnapshotSchema = z.object({
+  timeZone: z.string(),
   viewer: z.object({ displayName: z.string(), username: z.string(), avatarUrl: z.string().optional() }),
   guild: z.object({
     id: z.string(), name: z.string(), initials: z.string(), memberCount: z.number(),

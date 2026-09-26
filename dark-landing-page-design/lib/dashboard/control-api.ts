@@ -7,6 +7,7 @@ import type { ActivityRangeDays, DashboardSnapshot } from "@/lib/dashboard/contr
 
 interface ControlSnapshot {
   readonly guildId: string
+  readonly timeZone: string
   readonly configuration: DashboardSnapshot["configuration"] & {
     readonly lobbyChannelId: string
     readonly categoryId: string
@@ -39,6 +40,7 @@ interface ControlResponse {
 
 const controlSnapshotSchema = z.object({
   guildId: z.string(),
+  timeZone: z.string(),
   configuration: z.object({
     enabled: z.boolean(),
     lobbyChannelId: z.string(),
@@ -137,6 +139,7 @@ function mapSnapshot(
 ): DashboardSnapshot {
   const now = Date.now()
   return {
+    timeZone: raw.timeZone,
     viewer: {
       displayName: viewer.globalName ?? viewer.username,
       username: viewer.username,
@@ -184,10 +187,13 @@ export async function getControlDashboardSnapshot(
   guilds: readonly DiscordGuild[],
   viewer: DiscordViewer,
   days: ActivityRangeDays = 7,
+  timeZone = "UTC",
 ): Promise<DashboardSnapshot> {
   const selectedGuild = guilds.find((guild) => guild.id === guildId)
   if (!selectedGuild) throw new Error("Guild is not authorized")
-  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/snapshot?days=${days}`)
+  const snapshot = await controlRequest(
+    `/v1/dashboard/guilds/${guildId}/snapshot?days=${days}&timezone=${encodeURIComponent(timeZone)}`,
+  )
   return mapSnapshot(snapshot, selectedGuild, guilds, viewer, days)
 }
 
@@ -198,10 +204,11 @@ export async function updateControlDashboardConfiguration(
   viewer: DiscordViewer,
   requestId: string,
   days: ActivityRangeDays = 7,
+  timeZone = "UTC",
 ): Promise<DashboardSnapshot> {
   const selectedGuild = guilds.find((guild) => guild.id === guildId)
   if (!selectedGuild) throw new Error("Guild is not authorized")
-  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/config?days=${days}`, {
+  const snapshot = await controlRequest(`/v1/dashboard/guilds/${guildId}/config?days=${days}&timezone=${encodeURIComponent(timeZone)}`, {
     method: "PUT",
     headers: { "content-type": "application/json", "x-request-id": requestId },
     body: JSON.stringify(update),

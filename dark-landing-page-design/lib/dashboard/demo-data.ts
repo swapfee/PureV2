@@ -9,6 +9,7 @@ const guilds = [
 /** Demo-only data provider. Replace this boundary with the authenticated Pure API. */
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   return {
+    timeZone: "UTC",
     viewer: { displayName: "FonZ", username: "buystop" },
     guild: guilds[0],
     guilds,

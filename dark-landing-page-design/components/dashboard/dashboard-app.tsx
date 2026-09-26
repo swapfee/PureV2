@@ -83,6 +83,30 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     if (toastRemoveTimeout.current !== undefined) clearTimeout(toastRemoveTimeout.current)
   }, [])
 
+  useEffect(() => {
+    const detectedTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (!detectedTimeZone || detectedTimeZone === initialSnapshot.timeZone) return
+    const requestSequence = activityRequestSequence.current + 1
+    activityRequestSequence.current = requestSequence
+    setActivityLoading(true)
+    void fetch(
+      `/api/dashboard/guilds/${initialSnapshot.guild.id}/snapshot?days=7&timezone=${encodeURIComponent(detectedTimeZone)}`,
+      { cache: "no-store" },
+    ).then(async (response) => {
+      const result = zDashboardResponse(await response.json())
+      if (!response.ok || !result.snapshot) {
+        throw new Error(result.error ?? "Unable to align statistics with your timezone")
+      }
+      if (activityRequestSequence.current === requestSequence) setSnapshot(result.snapshot)
+    }).catch((error: unknown) => {
+      if (activityRequestSequence.current === requestSequence) {
+        showSaveToast(error instanceof Error ? error.message : "Unable to align statistics with your timezone")
+      }
+    }).finally(() => {
+      if (activityRequestSequence.current === requestSequence) setActivityLoading(false)
+    })
+  }, [initialSnapshot.guild.id, initialSnapshot.timeZone])
+
   function navigate(section: DashboardSection) {
     setActiveSection(section)
     setMobileOpen(false)
@@ -117,7 +141,7 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     if (Object.keys(update).length === 0) return
     setSaving(true)
     try {
-      const response = await fetch(`/api/dashboard/guilds/${selectedGuildId}/config?days=${activityDays}`, {
+      const response = await fetch(`/api/dashboard/guilds/${selectedGuildId}/config?days=${activityDays}&timezone=${encodeURIComponent(snapshot.timeZone)}`, {
         method: "PUT",
         headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID() },
         body: JSON.stringify(update),
@@ -144,7 +168,10 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     activityRequestSequence.current = requestSequence
     setActivityLoading(true)
     try {
-      const response = await fetch(`/api/dashboard/guilds/${guildId}/snapshot?days=${activityDays}`, { cache: "no-store" })
+      const response = await fetch(
+        `/api/dashboard/guilds/${guildId}/snapshot?days=${activityDays}&timezone=${encodeURIComponent(snapshot.timeZone)}`,
+        { cache: "no-store" },
+      )
       const result = zDashboardResponse(await response.json())
       if (!response.ok || !result.snapshot) throw new Error(result.error ?? "Unable to load server")
       if (activityRequestSequence.current !== requestSequence) return
@@ -169,7 +196,7 @@ export function DashboardApp({ initialSnapshot }: { initialSnapshot: DashboardSn
     setActivityLoading(true)
     try {
       const response = await fetch(
-        `/api/dashboard/guilds/${selectedGuildId}/snapshot?days=${days}`,
+        `/api/dashboard/guilds/${selectedGuildId}/snapshot?days=${days}&timezone=${encodeURIComponent(snapshot.timeZone)}`,
         { cache: "no-store" },
       )
       const result = zDashboardResponse(await response.json())
@@ -562,7 +589,7 @@ function StatisticsPanel({
   snapshot: DashboardSnapshot
   expanded?: boolean
 }) {
-  return <section className={cn("rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-6", expanded && "min-h-[520px]")}><div className="flex items-start justify-between"><div><h2 className="text-sm font-medium">Voice activity</h2><p className="mt-1 text-[11px] text-muted-foreground">Minutes spent in managed rooms · UTC</p></div><select aria-label="Voice activity range" className="rounded-lg border border-white/[0.08] bg-black px-2.5 py-1.5 text-[11px] text-muted-foreground outline-none disabled:cursor-wait disabled:opacity-50" disabled={loading} onChange={(event) => onRangeChange(event.target.value === "30" ? 30 : 7)} value={activityDays}><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select></div><div className={cn("mt-7 min-w-0 transition-opacity", loading && "opacity-45", expanded ? "h-[390px]" : "h-[245px]")}><VoiceActivityChart data={snapshot.voiceActivity} /></div></section>
+  return <section className={cn("rounded-2xl border border-white/[0.08] bg-[#0d0d0d] p-5 sm:p-6", expanded && "min-h-[520px]")}><div className="flex items-start justify-between"><div><h2 className="text-sm font-medium">Voice activity</h2><p className="mt-1 text-[11px] text-muted-foreground">Minutes spent in managed rooms · {snapshot.timeZone}</p></div><select aria-label="Voice activity range" className="rounded-lg border border-white/[0.08] bg-black px-2.5 py-1.5 text-[11px] text-muted-foreground outline-none disabled:cursor-wait disabled:opacity-50" disabled={loading} onChange={(event) => onRangeChange(event.target.value === "30" ? 30 : 7)} value={activityDays}><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select></div><div className={cn("mt-7 min-w-0 transition-opacity", loading && "opacity-45", expanded ? "h-[390px]" : "h-[245px]")}><VoiceActivityChart data={snapshot.voiceActivity} /></div></section>
 }
 
 function RecentActivityList({ activity }: { activity: DashboardSnapshot["activity"] }) {
