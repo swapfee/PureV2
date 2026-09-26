@@ -15,7 +15,8 @@ const targetId = "345678901234567890";
 const channelId = "456789012345678901";
 
 const snapshot: VoiceStatsSnapshot = {
-  guildId, userId: targetId, displayName: "Target", totalSeconds: 60, sessionCount: 1,
+  guildId, userId: targetId, displayName: "Target", timeZone: "UTC",
+  totalSeconds: 60, sessionCount: 1,
   activeDays: 1, currentSessionSeconds: 0,
   daily: Array.from({ length: 7 }, (_, index) => ({ day: new Date(Date.UTC(2026, 8, 17 + index)), seconds: index * 10 })),
   leaderboard: [],
@@ -78,6 +79,41 @@ describe("/stat command", () => {
     expect(response?.requestId).toBe("stat:interaction-1:render");
     expect(response?.embeds?.[0]?.description).toContain("<:success:1543407529302949908> Voice statistics generated.");
     expect(response?.embeds?.[0]?.color).toBeUndefined();
+  });
+
+  test("passes a validated IANA timezone to statistics and rejects invalid zones", async () => {
+    let receivedTimeZone: string | undefined;
+    const fx = await fixture();
+    const service = createStatsCommandService({
+      stats: {
+        handle: async () => undefined, reconcileGuild: async () => undefined,
+        checkpointGuild: async () => undefined, expectGuilds: () => undefined,
+        isReady: () => true,
+        getSnapshot: async (_guild, user, name, timeZone) => {
+          receivedTimeZone = timeZone;
+          return { ...snapshot, userId: user, displayName: name, timeZone: timeZone ?? "UTC" };
+        },
+        stopGuildTracking: async () => undefined,
+        purgeGuild: async () => ({ sessions: 0, members: 0, daily: 0, events: 0 }),
+      },
+      discord: fx.discord,
+      renderer: { render: async () => new Uint8Array([137, 80, 78, 71]) },
+      cooldowns: createCooldownStore({ maxEntries: 10 }),
+      metrics: createVoiceStatsMetrics(),
+      logger: createLogger({ service: "test", role: "stat", level: "fatal", write: () => undefined }),
+    });
+    await service.execute(interaction({
+      options: [{ name: "timezone", type: 3, value: "America/Los_Angeles" }],
+    }));
+    expect(receivedTimeZone).toBe("America/Los_Angeles");
+
+    const invalid = await fixture();
+    await invalid.service.execute(interaction({
+      options: [{ name: "timezone", type: 3, value: "VPS/Local" }],
+    }));
+    expect(invalid.controls.editedInteractions[0]?.embeds?.[0]?.description).toContain(
+      "Enter a valid IANA timezone",
+    );
   });
 
   test("passes the selected member username and loaded avatar to the card", async () => {

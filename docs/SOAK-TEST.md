@@ -29,9 +29,9 @@ For every item: perform the action, then confirm the expected observable result.
 | 20 | Unauthorized-user responses | Non-owners receive denial without channel mutation |
 | 21 | Atlas interruption | Transient Atlas blip surfaces as unhealthy readiness / structured errors; no silent partial mutations; recovery after Atlas returns |
 | 22 | Discord REST failure | Failed Discord calls are logged (redacted); retries/backoff behave safely; no duplicate channel storms |
-| 22a | `/stat` current member | While connected to an active managed channel, `/stat` returns a private 1600×900 PNG including current elapsed time |
+| 22a | `/stat` current member | `/stat` returns a private 1600×900 PNG including current elapsed time, even when the requester is not currently in voice |
 | 22b | `/stat member` | A human guild member can be selected; bot or missing targets are rejected privately |
-| 22c | `/stat` boundary | Outside a managed channel, the command refuses without rendering or uploading a file |
+| 22c | `/stat timezone` | A valid IANA timezone such as `America/Los_Angeles` aligns the seven-day graph and tracked-since date to that member-local calendar; an invalid timezone is rejected privately |
 | 22d | Redis restart | Restarting Redis makes stats unready; Mongo history remains and cache/session state rebuilds after reconciliation |
 | 22e | Statistics restart recovery | Restart the bot with members connected; active sessions reconcile without duplicate session totals |
 | 23 | Graceful SIGTERM | `docker compose stop` drains cleanly; container exits without orphan workers; temporary channels left in a reconcilable state |

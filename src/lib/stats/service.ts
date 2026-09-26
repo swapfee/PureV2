@@ -4,19 +4,16 @@ import type { Logger } from "../logger.ts";
 import type { Clock } from "../j2c/time.ts";
 import type { TemporaryChannelRepository } from "../j2c/repositories.ts";
 import type { VoiceStateUpdatePayload } from "../runtime-types.ts";
+import { normalizeTimeZone, overlapSeconds, zonedDayWindows } from "../time-zone.ts";
 import { statsQueryCacheKey, type VoiceStatsCache } from "./cache.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
-import {
-  splitDurationByUtcDay,
-  utcDayStart,
-  type VoiceStatsPurgeResult,
-  type VoiceStatsRepository,
-} from "./repositories.ts";
+import type { VoiceStatsPurgeResult, VoiceStatsRepository } from "./repositories.ts";
 
 export interface VoiceStatsSnapshot {
   readonly guildId: string;
   readonly userId: string;
   readonly displayName: string;
+  readonly timeZone: string;
   readonly trackedSince?: Date;
   readonly totalSeconds: number;
   readonly sessionCount: number;
@@ -31,7 +28,12 @@ export interface VoiceStatsService {
   reconcileGuild(guildId: string, states: readonly VoiceStateUpdatePayload[]): Promise<void>;
   expectGuilds(guildIds: readonly string[]): void;
   checkpointGuild(guildId: string): Promise<void>;
-  getSnapshot(guildId: string, userId: string, displayName: string): Promise<VoiceStatsSnapshot>;
+  getSnapshot(
+    guildId: string,
+    userId: string,
+    displayName: string,
+    timeZone?: string,
+  ): Promise<VoiceStatsSnapshot>;
   stopGuildTracking(guildId: string, eventId: string): Promise<void>;
   purgeGuild(guildId: string): Promise<VoiceStatsPurgeResult>;
   isReady(): boolean;
@@ -57,6 +59,7 @@ function parseCachedSnapshot(value: string): VoiceStatsSnapshot | undefined {
   const guildId = Reflect.get(parsed, "guildId");
   const userId = Reflect.get(parsed, "userId");
   const displayName = Reflect.get(parsed, "displayName");
+  const timeZone = Reflect.get(parsed, "timeZone");
   const totalSeconds = Reflect.get(parsed, "totalSeconds");
   const sessionCount = Reflect.get(parsed, "sessionCount");
   const activeDays = Reflect.get(parsed, "activeDays");
@@ -65,7 +68,8 @@ function parseCachedSnapshot(value: string): VoiceStatsSnapshot | undefined {
   const leaderboardRaw = Reflect.get(parsed, "leaderboard");
   if (
     typeof guildId !== "string" || typeof userId !== "string" ||
-    typeof displayName !== "string" || typeof totalSeconds !== "number" ||
+    typeof displayName !== "string" || typeof timeZone !== "string" ||
+    typeof totalSeconds !== "number" ||
     typeof sessionCount !== "number" || typeof activeDays !== "number" ||
     typeof currentSessionSeconds !== "number" || !Array.isArray(dailyRaw) ||
     !Array.isArray(leaderboardRaw)
@@ -90,7 +94,7 @@ function parseCachedSnapshot(value: string): VoiceStatsSnapshot | undefined {
   const trackedSince = Reflect.get(parsed, "trackedSince");
   if (trackedSince !== undefined && typeof trackedSince !== "string") return undefined;
   return {
-    guildId, userId, displayName, totalSeconds, sessionCount, activeDays,
+    guildId, userId, displayName, timeZone, totalSeconds, sessionCount, activeDays,
     currentSessionSeconds, daily, leaderboard,
     ...(trackedSince ? { trackedSince: new Date(trackedSince) } : {}),
   };
@@ -210,8 +214,10 @@ export function createVoiceStatsService(options: Options): VoiceStatsService {
         try { await options.cache.setActive({ ...session, lastConfirmedAt: now }); } catch (error) { cacheFailure(error, "checkpoint_set"); }
       }
     },
-    async getSnapshot(guildId, userId, displayName) {
-      const key = statsQueryCacheKey(guildId, userId);
+    async getSnapshot(guildId, userId, displayName, requestedTimeZone = "UTC") {
+      const timeZone = normalizeTimeZone(requestedTimeZone);
+      if (!timeZone) throw new RangeError("invalid_time_zone");
+      const key = statsQueryCacheKey(guildId, userId, timeZone);
       if (options.cache.isReady()) {
         try {
           const cached = await options.cache.getJson(key);
@@ -222,26 +228,39 @@ export function createVoiceStatsService(options: Options): VoiceStatsService {
         } catch (error) { cacheFailure(error, "query_get"); }
       }
       const now = options.clock.now();
-      const from = new Date(utcDayStart(now).getTime() - 6 * 86_400_000);
-      const member = await options.repository.getMember(guildId, userId);
-      const active = await options.repository.findActive(guildId, userId);
-      const dailyRows = await options.repository.getDaily(guildId, userId, from, utcDayStart(now));
-      const byDay = new Map(dailyRows.map((row) => [row.day.toISOString(), row.durationSeconds]));
-      if (active) {
-        for (const part of splitDurationByUtcDay(active.startedAt, now)) {
-          byDay.set(part.day.toISOString(), (byDay.get(part.day.toISOString()) ?? 0) + part.seconds);
+      const windows = zonedDayWindows(now, 7, timeZone);
+      const firstWindow = windows[0];
+      if (!firstWindow) throw new Error("voice_stats_day_windows_empty");
+      const [member, active, sessions, leaderboardRows, activeDays] = await Promise.all([
+        options.repository.getMember(guildId, userId),
+        options.repository.findActive(guildId, userId),
+        options.repository.listMemberSessionsOverlapping(guildId, userId, firstWindow.start, now),
+        options.repository.getLeaderboard(guildId, 5),
+        options.repository.countActiveDays(guildId, userId),
+      ]);
+      const byDay = new Map(windows.map((window) => [window.key, 0]));
+      for (const session of sessions) {
+        const sessionEnd = session.status === "active"
+          ? now
+          : session.endedAt ?? session.lastConfirmedAt;
+        for (const window of windows) {
+          const seconds = overlapSeconds(session.startedAt, sessionEnd, window);
+          if (seconds > 0) {
+            byDay.set(window.key, (byDay.get(window.key) ?? 0) + seconds);
+          }
         }
       }
-      const daily = Array.from({ length: 7 }, (_, index) => {
-        const day = new Date(from.getTime() + index * 86_400_000);
-        return { day, seconds: byDay.get(day.toISOString()) ?? 0 };
-      });
-      const leaderboard = (await options.repository.getLeaderboard(guildId, 5)).map((row) => ({ userId: row.userId, displayName: row.lastKnownDisplayName ?? `Member ${row.userId.slice(-4)}`, totalSeconds: row.totalSeconds }));
+      const daily = windows.map((window) => ({
+        day: new Date(`${window.key}T00:00:00.000Z`),
+        seconds: byDay.get(window.key) ?? 0,
+      }));
+      const leaderboard = leaderboardRows.map((row) => ({ userId: row.userId, displayName: row.lastKnownDisplayName ?? `Member ${row.userId.slice(-4)}`, totalSeconds: row.totalSeconds }));
       const currentSessionSeconds = active ? Math.max(0, Math.floor((now.getTime() - active.startedAt.getTime()) / 1_000)) : 0;
       const snapshot: VoiceStatsSnapshot = {
-        guildId, userId, displayName, ...(member ? { trackedSince: member.firstTrackedAt } : {}),
+        guildId, userId, displayName, timeZone,
+        ...(member ? { trackedSince: member.firstTrackedAt } : {}),
         totalSeconds: (member?.totalSeconds ?? 0) + currentSessionSeconds,
-        sessionCount: member?.sessionCount ?? 0, activeDays: await options.repository.countActiveDays(guildId, userId),
+        sessionCount: member?.sessionCount ?? 0, activeDays,
         currentSessionSeconds, daily, leaderboard,
       };
       try { await options.cache.setJson(key, JSON.stringify(snapshot), 30); } catch (error) { cacheFailure(error, "query_set"); }

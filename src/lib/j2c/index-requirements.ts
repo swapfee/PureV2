@@ -92,6 +92,7 @@ export const REQUIRED_J2C_INDEX_SPECS: Readonly<Record<string, readonly Required
       partialFilterExpression: { status: "active" },
     },
     { name: "voice_stats_sessions_member_startedAt", keys: { guildId: 1, userId: 1, startedAt: -1 } },
+    { name: "voice_stats_sessions_guild_startedAt", keys: { guildId: 1, startedAt: -1 } },
     { name: "voice_stats_sessions_expiresAt_ttl", keys: { expiresAt: 1 }, expireAfterSeconds: 0 },
   ],
   VoiceMemberStats: [

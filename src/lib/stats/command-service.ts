@@ -1,6 +1,7 @@
 import type { CooldownStore } from "../../handlers/cooldowns.ts";
 import type { Logger } from "../logger.ts";
 import type { DiscordApiPort, InteractionCreatePayload } from "../runtime-types.ts";
+import { normalizeTimeZone } from "../time-zone.ts";
 import { failureResponse, successResponse } from "../j2c/action-response.ts";
 import { beginEphemeralProgress } from "../j2c/interaction-progress.ts";
 import type { VoiceStatsMetrics } from "./metrics.ts";
@@ -13,6 +14,11 @@ const MAX_PNG_BYTES = 3_500_000;
 
 function memberOption(interaction: InteractionCreatePayload): string | undefined {
   const value = interaction.options?.find((option) => option.name === "member")?.value;
+  return typeof value === "string" ? value : undefined;
+}
+
+function timeZoneOption(interaction: InteractionCreatePayload): string | undefined {
+  const value = interaction.options?.find((option) => option.name === "timezone")?.value;
   return typeof value === "string" ? value : undefined;
 }
 
@@ -93,13 +99,24 @@ export function createStatsCommandService(options: {
       const remaining = options.cooldowns.remaining(`stat:${interaction.guildId}:${interaction.userId}`);
       if (remaining > 0) { await fail(`Please wait ${Math.ceil(remaining / 1_000)} seconds before generating another statistics card.`); return; }
       options.cooldowns.check(`stat:${interaction.guildId}:${interaction.userId}`, COOLDOWN_MS);
+      const requestedTimeZone = timeZoneOption(interaction) ?? "UTC";
+      const timeZone = normalizeTimeZone(requestedTimeZone);
+      if (!timeZone) {
+        await fail("Enter a valid IANA timezone, such as America/Los_Angeles.");
+        return;
+      }
       const targetUserId = memberOption(interaction) ?? interaction.userId;
       const target = await options.discord.getGuildMember({ guildId: interaction.guildId, userId: targetUserId });
       if (target.kind !== "found") { await fail("That member could not be found in this server."); return; }
       if (target.value.bot) { await fail("Bot accounts do not have managed voice statistics."); return; }
       const displayName = target.value.nick ?? target.value.globalName ?? target.value.username ?? `Member ${targetUserId.slice(-4)}`;
       try {
-        const snapshot = await options.stats.getSnapshot(interaction.guildId, targetUserId, displayName);
+        const snapshot = await options.stats.getSnapshot(
+          interaction.guildId,
+          targetUserId,
+          displayName,
+          timeZone,
+        );
         const guild = await options.discord.getGuild({ guildId: interaction.guildId });
         const serverName = guild.kind === "found" && guild.value.name
           ? guild.value.name
@@ -117,7 +134,7 @@ export function createStatsCommandService(options: {
           }
         }
         const username = target.value.username ?? displayName;
-        const png = await render(`${interaction.guildId}:${targetUserId}`, () => options.renderer.render({
+        const png = await render(`${interaction.guildId}:${targetUserId}:${timeZone}`, () => options.renderer.render({
           ...snapshot,
           username,
           serverName,

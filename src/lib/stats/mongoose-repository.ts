@@ -54,6 +54,23 @@ export function createMongooseVoiceStatsRepository(): VoiceStatsRepository {
       const docs = await VoiceStatsSessionModel.find({ guildId, status: "active" }).lean();
       return docs.map(sessionRecord);
     },
+    async listGuildSessionsOverlapping(guildId, from, to) {
+      const docs = await VoiceStatsSessionModel.find({
+        guildId,
+        startedAt: { $lt: to },
+        $or: [{ status: "active" }, { endedAt: { $gt: from } }],
+      }).sort({ startedAt: 1 }).lean();
+      return docs.map(sessionRecord);
+    },
+    async listMemberSessionsOverlapping(guildId, userId, from, to) {
+      const docs = await VoiceStatsSessionModel.find({
+        guildId,
+        userId,
+        startedAt: { $lt: to },
+        $or: [{ status: "active" }, { endedAt: { $gt: from } }],
+      }).sort({ startedAt: 1 }).lean();
+      return docs.map(sessionRecord);
+    },
     async open(input: OpenVoiceStatsSessionInput) {
       let created: VoiceStatsSessionDocument | undefined;
       await VoiceStatsSessionModel.db.transaction(async (mongoSession) => {
