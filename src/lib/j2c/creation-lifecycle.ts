@@ -10,7 +10,6 @@ import type {
   TemporaryChannelRepository,
 } from "./repositories.ts";
 import {
-  channelPositionRequestId,
   compensateDeleteRequestId,
   creationRequestId,
   creationReservationId,
@@ -450,67 +449,6 @@ export function createCreationLifecycle(options: {
       await options.reservationService.complete(reservationId, channelId);
       options.metrics.increment("creationSuccesses");
 
-      // The member is already in their room. Finish non-critical presentation work
-      // concurrently so positioning and panel delivery never delay the move.
-      const positionChannel = async (): Promise<void> => {
-        if (config.channelHoist !== "bottom") return;
-        try {
-          const lobby = await options.discord.getChannel({ channelId: config.lobbyChannelId });
-          if (
-            lobby.kind !== "found" ||
-            typeof lobby.value.position !== "number" ||
-            !Number.isInteger(lobby.value.position) ||
-            lobby.value.position < 0
-          ) {
-            // Appending is the safe fallback: the room remains below the lobby.
-            options.logger.warn("Unable to resolve lobby position for bottom channel hoist", {
-              guildId: input.guildId,
-              channelId: config.lobbyChannelId,
-              outcome: lobby.kind,
-            });
-            return;
-          }
-          const channelPosition = lobby.value.position + 1;
-          const positioned = await options.discord.setGuildChannelPosition({
-            guildId: input.guildId,
-            channelId,
-            position: channelPosition,
-            requestId: channelPositionRequestId(input.eventId),
-            reason: "join-to-create channel hoist",
-          });
-          if (positioned.kind === "ok") return;
-
-          options.logger.error("Temporary channel position update failed", {
-            guildId: input.guildId,
-            channelId,
-            lobbyChannelId: config.lobbyChannelId,
-            requestedPosition: channelPosition,
-            result: positioned.kind,
-          });
-          await postGuildErrorLog({
-            discord: options.discord,
-            configs: options.configs,
-            logger: options.logger,
-            guildId: input.guildId,
-            requestId: `${channelPositionRequestId(input.eventId)}:error-log`,
-            entry: {
-              area: positioned.kind === "forbidden" ? "permissions" : "join_to_create",
-              summary: "Created a temporary voice channel but could not place it below the lobby.",
-              detail: `Discord outcome: \`${positioned.kind}\`.`,
-              solution: solutionForDiscordOutcome(positioned.kind),
-              userId: input.memberId,
-              channelId,
-            },
-          });
-        } catch (error) {
-          options.logger.error("Temporary channel position task failed", {
-            guildId: input.guildId,
-            channelId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      };
-
       const installPanel = async (): Promise<void> => {
         try {
           const botUser = await resolveBotUser();
@@ -543,7 +481,9 @@ export function createCreationLifecycle(options: {
         }
       };
 
-      await Promise.all([positionChannel(), installPanel(), refreshActiveGauge()]);
+      // Discord appends the new channel inside its parent category. Avoid a
+      // redundant channel lookup and position mutation on the creation path.
+      await Promise.all([installPanel(), refreshActiveGauge()]);
 
       options.logger.info("Temporary channel created", {
         guildId: input.guildId,
